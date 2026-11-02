@@ -1,0 +1,61 @@
+# リール自動投稿：30分ごとにNotionの投稿キューを確認し、予定時刻を過ぎた「投稿予約」を投稿する。
+# DRY_RUN（リポジトリ変数）が false になるまでは投稿しない（動画を作ってチェックするだけ）。
+name: リール自動投稿
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"      # 毎時17分と47分（UTC。日本時間でも同じ分）
+  workflow_dispatch: {}            # 「Run workflow」ボタンで手動実行もできる
+
+concurrency:
+  group: reel-autopost             # 同時に2つ動かない（二重投稿防止）
+  cancel-in-progress: false
+
+permissions:
+  contents: write                  # 動画の一時置き場（mediaブランチ）に書くため
+  issues: write                    # 失敗時にIssueで通知するため
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 動画作成に必要なものを入れる
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk fonts-noto-cjk-extra > /dev/null
+          pip install -q -r requirements.txt
+      - name: 投稿キューを処理
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ vars.DRY_RUN }}
+          MAX_POSTS_PER_DAY: ${{ vars.MAX_POSTS_PER_DAY }}
+        run: python -m autopost.post_queue
+      - name: 作った動画を保存（確認用・7日間）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reels-${{ github.run_id }}
+          path: |
+            out/**/reel.mp4
+            out/**/cover.png
+            out/**/qa.json
+            out/**/投稿情報.md
+            out/summary.json
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: 失敗をIssueで通知
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "【要確認】リール自動投稿でエラー（$(TZ=Asia/Tokyo date '+%m/%d %H:%M')）" \
+            --body "Notionの「リール投稿キュー」でステータスが「エラー」または「期限切れ」の行の「エラー内容」を確認してください。実行ログ: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

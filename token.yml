@@ -1,0 +1,32 @@
+# トークンの確認：毎週日曜にInstagramのトークンが使えるか・期限なしのままかを確認する（Facebookログイン版は延長不要）。
+name: Instagramトークンの確認
+
+on:
+  schedule:
+    - cron: "41 0 * * 0"         # 毎週日曜 日本時間 9:41
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  token:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 確認
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+        run: python -m autopost.token_check
+      - name: 失敗をIssueで通知
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "【要対応】Instagramのトークンを入れ直してください" --body "Facebookログイン版の手順書の手順3〜4でページアクセストークンを作り直し、Secretsの IG_ACCESS_TOKEN を更新してください。実行ログ: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

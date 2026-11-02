@@ -1,0 +1,33 @@
+# 数字の自動取得：毎朝、投稿30日以内のリールの再生数・保存・シェアなどをNotionのリール実績DBに書き込む。
+name: リールの数字を取得
+
+on:
+  schedule:
+    - cron: "23 21 * * *"        # 毎日 日本時間 6:23
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  insights:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 数字を取得してNotionへ
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+        run: python -m autopost.insights
+      - name: 失敗をIssueで通知
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "【要確認】リールの数字の取得に失敗" --body "実行ログ: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
