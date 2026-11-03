@@ -610,8 +610,82 @@ SCENES = {"hook": scene_hook, "points": scene_points, "sheet": scene_sheet, "com
 
 
 # ---------------------------------------------------------------- audio
-def synth_sfx(events: list[tuple[float, str]], total: float, path: Path, sr: int = 48000):
-    """著作権の問題がない、自作の小さな効果音だけの音声トラックを作る。"""
+# BGM：外部の曲・素材は使わず、ここで一から合成する（著作権の問題がない自作曲）
+_NOTE = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+_PROGS = [[0, 7, 9, 5], [9, 5, 0, 7], [0, 9, 5, 7], [5, 7, 4, 9]]   # 度数（I–V–vi–IV など）
+_MINOR = {9, 4, 2}                                                    # vi・iii・ii は短三和音
+
+
+def synth_bgm(total: float, seed: str = "", sr: int = 48000) -> np.ndarray:
+    """落ち着いたローファイ風のBGM（エレピの和音・ベース・アルペジオ・軽いリズム）。
+
+    台本の id から調・コード進行・テンポを決めるので、リールごとに少しずつ違う曲になる。
+    """
+    h = sum(ord(c) * (i + 1) for i, c in enumerate(seed or "reel"))
+    key = _NOTE["CDFGA"[h % 5]]
+    prog = _PROGS[(h // 5) % len(_PROGS)]
+    bpm = (84, 88, 92, 96)[(h // 20) % 4]
+    beat = 60.0 / bpm
+    n = int(total * sr) + sr
+    out = np.zeros(n, dtype=np.float32)
+    rng = np.random.default_rng(h)
+
+    def hz(midi):
+        return 440.0 * 2 ** ((midi - 69) / 12)
+
+    def note(f, dur, amp, decay, harm=(1.0, 0.35, 0.12), detune=0.0):
+        m = int(dur * sr)
+        tt = np.arange(m) / sr
+        w = sum(a * np.sin(2 * np.pi * f * (k + 1) * (1 + detune) * tt) for k, a in enumerate(harm))
+        env = np.minimum(1, tt / 0.012) * np.exp(-tt * decay)
+        env *= np.minimum(1, (dur - tt) / 0.03)    # 終わりを少しずつ消す（プツッという音を防ぐ）
+        return (w * env * amp).astype(np.float32)
+
+    def add(at, sig):
+        i = int(at * sr)
+        if 0 <= i < n:
+            j = min(n, i + len(sig))
+            out[i:j] += sig[: j - i]
+
+    m = int(0.22 * sr)
+    tt = np.arange(m) / sr
+    kick = (np.sin(2 * np.pi * np.cumsum(np.linspace(110, 45, m)) / sr) * np.exp(-tt * 18) * 0.5).astype(np.float32)
+    hat_n = int(0.04 * sr)
+    hat = (np.diff(rng.uniform(-1, 1, hat_n + 1)) * np.exp(-np.arange(hat_n) / sr * 90) * 0.05).astype(np.float32)
+
+    bar, t = 0, 0.0
+    while t < total + beat * 4:
+        deg = prog[bar % 4]
+        root = 48 + key + deg                      # C3 付近
+        third = 3 if deg in _MINOR else 4
+        chord = [root + 12, root + 12 + third, root + 19, root + 23 - (1 if deg in _MINOR else 0)]  # 7th
+        for k, mn in enumerate(chord):             # エレピの和音（小節頭）
+            add(t + k * 0.012, note(hz(mn), beat * 4, 0.05, 0.9, detune=0.0015 * (k - 1.5)))
+        add(t, note(hz(root - 12), beat * 2, 0.13, 1.4, harm=(1.0, 0.2)))          # ベース
+        add(t + beat * 2.5, note(hz(root - 12 + 7), beat * 1.5, 0.09, 1.8, harm=(1.0, 0.2)))
+        arp = [chord[0] + 12, chord[1] + 12, chord[2] + 12, chord[1] + 12]
+        for e in range(8):                         # 8分のアルペジオ（小さめ）
+            add(t + e * beat / 2 + 0.01, note(hz(arp[e % 4]), beat * 0.6, 0.022, 6.0, harm=(1.0, 0.5, 0.25)))
+        for b in range(4):                         # 軽いリズム
+            if b in (0, 2):
+                add(t + b * beat, kick)
+            add(t + b * beat + beat / 2, hat)
+        t += beat * 4
+        bar += 1
+
+    out = out[: int(total * sr)]
+    # 高音を少しなめらかに（簡単なローパス）
+    out = np.convolve(out, np.ones(6, dtype=np.float32) / 6, mode="same").astype(np.float32)
+    fade_in, fade_out = int(0.6 * sr), int(1.8 * sr)
+    out[:fade_in] *= np.linspace(0, 1, fade_in)
+    out[-fade_out:] *= np.linspace(1, 0, fade_out)
+    peak = float(np.max(np.abs(out))) or 1.0
+    return (out / peak * 0.32).astype(np.float32)   # 効果音より控えめ
+
+
+def synth_sfx(events: list[tuple[float, str]], total: float, path: Path, sr: int = 48000,
+              bgm: np.ndarray | None = None):
+    """著作権の問題がない、自作の効果音（＋自作BGM）の音声トラックを作る。"""
     audio = np.zeros(int(total * sr) + sr, dtype=np.float32)
 
     def tone(f0, f1, dur, amp, noise=0.0):
@@ -638,7 +712,13 @@ def synth_sfx(events: list[tuple[float, str]], total: float, path: Path, sr: int
         if 0 <= i < len(audio):
             j = min(len(audio), i + len(s))
             audio[i:j] += s[: j - i]
-    audio = np.clip(audio[: int(total * sr)], -0.9, 0.9)
+    audio = audio[: int(total * sr)]
+    if bgm is not None:
+        audio[: len(bgm)] += bgm[: len(audio)]
+    rms = float(np.sqrt(np.mean(audio ** 2))) if len(audio) else 0.0
+    if rms > 1e-6:                                # スマホで聞きやすい音量にそろえる（目安 -16 LUFS 前後）
+        audio = audio * (0.17 / rms)
+    audio = np.tanh(audio * 1.1) * 0.9            # 割れないように、なめらかに抑える
     pcm = (audio * 32767).astype(np.int16)
     with wave.open(str(path), "wb") as wf:
         wf.setnchannels(1)
@@ -764,7 +844,8 @@ def render(script_path: Path, out_dir: Path) -> dict:
     proc.stdin.close()
     if proc.wait():
         raise RuntimeError("動画のエンコードに失敗しました")
-    synth_sfx(ctx.sfx, total, silent)
+    bgm = synth_bgm(total, spec.get("id", "")) if spec.get("bgm", True) else None
+    synth_sfx(ctx.sfx, total, silent, bgm=bgm)
     r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(out_dir / "_video.mp4"), "-i", str(silent),
                         "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
                         "-ar", "48000", "-shortest", "-movflags", "+faststart", str(video)],
