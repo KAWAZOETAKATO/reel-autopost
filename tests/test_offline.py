@@ -22,9 +22,10 @@ SPEC = json.loads((ROOT / "examples" / "reel01.json").read_text(encoding="utf-8"
 GOOD_QA = {"passed_format_checks": True, "duration_seconds": 29.4, "warnings": []}
 
 
-def page(pid, name, status="投稿予約", due=None, theme="関数", err=""):
+def page(pid, name, status="投稿予約", due=None, theme="関数", err="", account=None):
     due = due or (now_jst() - timedelta(minutes=5)).isoformat()
-    return {"id": pid, "properties": {
+    extra = {"アカウント": {"select": {"name": account}}} if account else {}
+    return {"id": pid, "properties": {**extra,
         "投稿名": {"title": [{"plain_text": name}]},
         "ステータス": {"status": {"name": status}},
         "予定日時": {"date": {"start": due}},
@@ -411,6 +412,38 @@ class TokenCheckTest(unittest.TestCase):
 
     def test_broken_token_fails(self):
         self.assertEqual(self.run_check({}, me_ok=False), 1)
+
+
+class MultiAccountTest(unittest.TestCase):
+    def run_q(self, c, notion, ig):
+        host = FakeHost()
+        with tempfile.TemporaryDirectory() as d:
+            s = post_queue.process(c, notion, ig, Path(d), render=fake_render(), host=host)
+        return s
+
+    def test_kanji_row_uses_kanji_account(self):
+        main, kanji = FakeIG(), FakeIG()
+        n = FakeNotion([page("a", "#01"), page("k", "漢字#01", account="漢字")])
+        s = self.run_q(cfg(dry=False, limit=1), n, {"main": main, "kanji": kanji})
+        self.assertEqual(len(main.published), 1)
+        self.assertEqual(len(kanji.published), 1)                 # 上限はアカウントごと
+        self.assertEqual(len(s["posted"]), 2)
+        labels = [props["アカウント"]["select"]["name"] for _, props in n.created]
+        self.assertEqual(labels, ["事務", "漢字"])
+
+    def test_kanji_row_without_secrets_is_error(self):
+        main = FakeIG()
+        n = FakeNotion([page("k", "漢字#01", account="漢字")])
+        s = self.run_q(cfg(dry=False), n, {"main": main})
+        self.assertEqual(main.published, [])
+        self.assertEqual(n.last_status("k"), "エラー")
+        self.assertIn("IG_ACCESS_TOKEN_KANJI", s["errors"][0]["error"])
+
+    def test_account_key(self):
+        from autopost.common import account_key
+        self.assertEqual(account_key({}), "main")
+        self.assertEqual(account_key(page("a", "x")), "main")
+        self.assertEqual(account_key(page("a", "x", account="漢字")), "kanji")
 
 
 if __name__ == "__main__":

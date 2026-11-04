@@ -7,7 +7,7 @@ from __future__ import annotations
 import sys
 from datetime import timedelta
 
-from .common import Config, HttpError, log, now_jst
+from .common import ACCOUNTS, Config, HttpError, account_key, log, now_jst
 from .instagram import Instagram
 from .notion import Notion, p_text, p_title, w_date, w_select, w_title
 
@@ -49,8 +49,11 @@ def record_account(cfg: Config, notion: Notion, ig: Instagram) -> dict | None:
         return None
 
 
-def run(cfg: Config, notion: Notion, ig: Instagram) -> dict:
-    record_account(cfg, notion, ig)
+def run(cfg: Config, notion: Notion, ig) -> dict:
+    """ig は Instagram（事務だけ）か {キー: Instagram}。"""
+    clients = ig if isinstance(ig, dict) else {"main": ig}
+    for c in clients.values():
+        record_account(cfg, notion, c)
     since = (now_jst() - timedelta(days=30)).date().isoformat()
     rows = notion.query(cfg.results_db, {"and": [
         {"property": "メディアID", "rich_text": {"is_not_empty": True}},
@@ -58,8 +61,11 @@ def run(cfg: Config, notion: Notion, ig: Instagram) -> dict:
     done, failed = 0, []
     for page in rows:
         mid = p_text(page, "メディアID").strip()
+        client = clients.get(account_key(page))
+        if client is None:
+            continue
         try:
-            m = ig.insights(mid)
+            m = client.insights(mid)
         except HttpError as e:
             failed.append(f"{p_title(page, '投稿名')}（{e.status}）")
             continue
@@ -79,9 +85,19 @@ def main() -> int:
     if cfg.secrets_missing:
         log("設定がありません：" + ", ".join(cfg.secrets_missing))
         return 1
-    ig = Instagram(cfg.ig_token, cfg.ig_user_id, cfg.graph_version)
-    ig.resolve_user_id()
-    r = run(cfg, Notion(cfg.notion_token), ig)
+    clients = {}
+    for key, (tok, uid) in cfg.accounts.items():
+        if not tok:
+            continue
+        try:
+            c = Instagram(tok, uid, cfg.graph_version)
+            c.resolve_user_id()
+            clients[key] = c
+        except Exception as e:
+            log(f"{ACCOUNTS[key][0]}アカウントのトークンが使えません：{e}")
+    if not clients:
+        return 1
+    r = run(cfg, Notion(cfg.notion_token), clients)
     return 1 if r["failed"] and not r["updated"] else 0
 
 

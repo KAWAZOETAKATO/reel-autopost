@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 from datetime import datetime
 
-from .common import JST, Config, HttpError, log
+from .common import ACCOUNTS, JST, Config, HttpError, log
 from .instagram import Instagram, debug_token
 
 
@@ -18,15 +18,25 @@ def main() -> int:
     if not cfg.ig_token:
         log("IG_ACCESS_TOKEN が未設定です")
         return 1
+    codes = []
+    for key, (tok, uid) in (cfg.accounts or {"main": (cfg.ig_token, cfg.ig_user_id)}).items():
+        if not tok:
+            continue
+        log(f"--- {ACCOUNTS[key][0]}アカウント")
+        codes.append(check_one(tok, uid, cfg.graph_version))
+    return 1 if any(codes) else 0
+
+
+def check_one(token: str, user_id: str, version: str) -> int:
     try:
-        me = Instagram(cfg.ig_token, cfg.ig_user_id, cfg.graph_version).me()
+        me = Instagram(token, user_id, version).me()
         log(f"トークンは有効です（アカウント：@{me.get('username', '?')}／ID：{me.get('user_id', '?')}）")
     except (HttpError, RuntimeError) as e:
         log(f"トークンが使えません（{getattr(e, 'status', '')} {str(e)[:200]}）。手順書の手順3〜4でトークンを作り直してください")
         return 1
 
     try:
-        info = debug_token(cfg.ig_token, cfg.graph_version)
+        info = debug_token(token, version)
     except HttpError as e:
         log(f"トークンの期限を調べられませんでした（HTTP {e.status}）。投稿には影響しません")
         return 0

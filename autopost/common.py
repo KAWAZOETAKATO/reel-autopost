@@ -35,6 +35,24 @@ def _dry_run(v: str | None) -> bool:
     return (v or "").strip().lower() not in ("false", "0", "no", "off")
 
 
+# 投稿先のアカウント。キューの「アカウント」列（選択）の値で切り替える。空欄は「事務」。
+# 値：(Notionの選択肢名, トークンのSecret名, InstagramのIDのSecret名)
+ACCOUNTS = {
+    "main": ("事務", "IG_ACCESS_TOKEN", "IG_USER_ID"),
+    "kanji": ("漢字", "IG_ACCESS_TOKEN_KANJI", "IG_USER_ID_KANJI"),
+}
+
+
+def account_key(page: dict) -> str:
+    """Notionの行から投稿先アカウントのキーを返す（列がない・空欄なら main）。"""
+    sel = (page.get("properties", {}).get("アカウント") or {}).get("select") or {}
+    name = sel.get("name", "")
+    for key, (label, _, _) in ACCOUNTS.items():
+        if name and name == label:
+            return key
+    return "main"
+
+
 @dataclass
 class Config:
     notion_token: str = ""
@@ -47,6 +65,7 @@ class Config:
     max_posts_per_day: int = 1           # 1日の自動投稿の上限（APIの上限は24時間で100件）
     graph_version: str = "v26.0"
     repo: str = ""                       # owner/repo（動画の一時置き場URLに使う）
+    accounts: dict = field(default_factory=dict)   # {キー: (トークン, ID)}。トークンが空のアカウントは未設定
     secrets_missing: list = field(default_factory=list)
 
     @classmethod
@@ -63,6 +82,8 @@ class Config:
             graph_version=os.environ.get("IG_GRAPH_VERSION") or "v26.0",
             repo=os.environ.get("GITHUB_REPOSITORY", ""),
         )
+        for key, (_, tok, uid) in ACCOUNTS.items():
+            c.accounts[key] = (os.environ.get(tok, ""), os.environ.get(uid) or "me")
         for name, val in (("NOTION_TOKEN", c.notion_token), ("IG_ACCESS_TOKEN", c.ig_token)):
             if not val:
                 c.secrets_missing.append(name)

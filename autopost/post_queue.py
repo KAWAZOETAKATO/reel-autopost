@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import hosting
-from .common import JST, Config, log, now_jst
+from .common import ACCOUNTS, JST, Config, account_key, log, now_jst
 from .instagram import Instagram
 from .notion import (Notion, p_date, p_select, p_text, p_title, w_date, w_select, w_status, w_text,
                      w_title)
@@ -41,12 +41,20 @@ def _parse(dt: str) -> datetime:
     return d
 
 
-def posted_today(notion: Notion, db: str) -> int:
+def posted_today(notion: Notion, db: str, account: str = "main") -> int:
+    """今日このアカウントで投稿済みの本数（1日の上限はアカウントごと）。"""
     today = now_jst().date().isoformat()
     rows = notion.query(db, {"and": [
         {"property": "ステータス", "status": {"equals": "投稿済み"}},
         {"property": "投稿日時", "date": {"on_or_after": today + "T00:00:00+09:00"}}]})
-    return len(rows)
+    return sum(1 for r in rows if account_key(r) == account)
+
+
+def _client(ig, key: str):
+    """ig は Instagram（事務だけ）か {キー: Instagram}。そのアカウントの投稿用クライアントを返す。"""
+    if isinstance(ig, dict):
+        return ig.get(key)
+    return ig if key == "main" else None
 
 
 def due_rows(notion: Notion, db: str) -> list[dict]:
@@ -106,11 +114,20 @@ def process(cfg: Config, notion: Notion, ig: Instagram | None, workdir: Path,
     if not rows:
         log("予定時刻を過ぎた「投稿予約」はありません")
         return summary
-    remaining = cfg.max_posts_per_day - posted_today(notion, cfg.queue_db)
-    log(f"対象 {len(rows)} 件／今日あと {max(remaining, 0)} 件まで投稿可（DRY_RUN={'オン' if cfg.dry_run else 'オフ'}）")
+    remaining_by: dict[str, int] = {}
+
+    def left(key: str) -> int:
+        if key not in remaining_by:
+            remaining_by[key] = cfg.max_posts_per_day - posted_today(notion, cfg.queue_db, key)
+        return remaining_by[key]
+
+    log(f"対象 {len(rows)} 件／1日の上限：アカウントごとに {cfg.max_posts_per_day} 本（DRY_RUN={'オン' if cfg.dry_run else 'オフ'}）")
 
     for page in rows:
         pid, name = page["id"], p_title(page, "投稿名") or page["id"]
+        acct = account_key(page)
+        label = ACCOUNTS[acct][0]
+        remaining = left(acct)
         if cfg.dry_run and p_text(page, "エラー内容").startswith(DRY_MARK):
             summary["skipped"] += 1
             continue
@@ -125,9 +142,12 @@ def process(cfg: Config, notion: Notion, ig: Instagram | None, workdir: Path,
                     summary["expired"].append(name)
                 continue
             if remaining <= 0 and not cfg.dry_run:
-                log(f"今日の上限に達したため、明日に回します：{name}")
+                log(f"{label}アカウントは今日の上限に達したため、明日に回します：{name}")
                 summary["skipped"] += 1
                 continue
+            client = None if cfg.dry_run else _client(ig, acct)
+            if not cfg.dry_run and client is None:
+                raise RuntimeError(f"{label}アカウントの投稿設定（{ACCOUNTS[acct][1]} / {ACCOUNTS[acct][2]}）がGitHubのSecretsにありません")
 
             if not cfg.dry_run:
                 notion.update(pid, {"ステータス": w_status("投稿中")})     # 二重処理の防止
@@ -146,7 +166,7 @@ def process(cfg: Config, notion: Notion, ig: Instagram | None, workdir: Path,
                 summary["dry_run"].append(name)
                 continue
 
-            if ig.quota_used() >= 50:
+            if client.quota_used() >= 50:
                 raise RuntimeError("24時間の投稿数が50件以上。異常の可能性があるため停止しました")
             base = f"{spec.get('id', 'reel')}_{now_jst():%Y%m%d%H%M%S}"     # 毎回別名（CDNの古いキャッシュ対策）
             cover_jpg = _to_jpeg(out / "cover.png")                  # 表紙はJPEGのみ受け付けられる
@@ -155,9 +175,9 @@ def process(cfg: Config, notion: Notion, ig: Instagram | None, workdir: Path,
                 host.wait_public(list(urls.values()))
                 video_url = next(u for k, u in urls.items() if k.endswith(".mp4"))
                 cover_url = next(u for k, u in urls.items() if k.endswith(".jpg"))
-                container = ig.prepare_reel(video_url, caption, cover_url)  # ここまでの失敗＝未公開
+                container = client.prepare_reel(video_url, caption, cover_url)  # ここまでの失敗＝未公開
                 stage = "公開"
-                media_id = ig.publish(container)                     # 1回だけ。再試行しない
+                media_id = client.publish(container)                     # 1回だけ。再試行しない
                 stage = "公開済み"
             finally:
                 try:
@@ -179,14 +199,14 @@ def process(cfg: Config, notion: Notion, ig: Instagram | None, workdir: Path,
             continue
 
         # ---- 公開に成功した後：ここから先の失敗では、ステータスを「エラー」にしない（再投稿の誘発を防ぐ）
-        remaining -= 1
+        remaining_by[acct] = remaining - 1
         stamp = now_jst().isoformat(timespec="seconds")
         ok = _safe_update(notion, pid, {"ステータス": w_status("投稿済み"), "メディアID": w_text(media_id),
                                         "投稿日時": w_date(stamp), "動画の長さ_秒": {"number": qa["duration_seconds"]},
                                         "エラー内容": {"rich_text": []}}, "投稿済み")
         link = ""
         try:
-            link = ig.permalink(media_id)
+            link = client.permalink(media_id)
             if link:
                 _safe_update(notion, pid, {"投稿URL": {"url": link}}, "投稿URL")
         except Exception as e:
@@ -198,6 +218,7 @@ def process(cfg: Config, notion: Notion, ig: Instagram | None, workdir: Path,
                 props["リールURL"] = {"url": link}
             if p_select(page, "テーマ"):
                 props["テーマ"] = w_select(p_select(page, "テーマ"))
+            props["アカウント"] = w_select(label)
             notion.create(cfg.results_db, props)
         except Exception as e:
             log(f"リール実績DBへの記録に失敗（投稿は成功）：{e}")
@@ -228,15 +249,21 @@ def main() -> int:
     if not cfg.notion_token:
         log("NOTION_TOKEN が未設定です（セットアップ手順書の手順3）")
         return 1
-    missing_ig = [m for m in cfg.secrets_missing if m != "NOTION_TOKEN"]
-    if not cfg.dry_run and missing_ig:
-        log("本番投稿に必要な設定がありません：" + ", ".join(missing_ig))
-        return 1
     notion = Notion(cfg.notion_token)
-    ig = None
+    ig = {}
     if not cfg.dry_run:
-        ig = Instagram(cfg.ig_token, cfg.ig_user_id, cfg.graph_version)
-        ig.resolve_user_id()
+        for key, (tok, uid) in cfg.accounts.items():
+            if not tok:
+                continue                      # 未設定のアカウントの行は「エラー」で知らせる
+            try:
+                c = Instagram(tok, uid, cfg.graph_version)
+                c.resolve_user_id()
+                ig[key] = c
+            except Exception as e:
+                log(f"{ACCOUNTS[key][0]}アカウントのトークンが使えません：{e}")
+        if not ig:
+            log("本番投稿に必要な設定がありません：IG_ACCESS_TOKEN（または IG_ACCESS_TOKEN_KANJI）")
+            return 1
     summary = process(cfg, notion, ig, ROOT / "out")
     Path(ROOT / "out").mkdir(exist_ok=True)
     (ROOT / "out" / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

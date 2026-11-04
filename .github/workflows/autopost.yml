@@ -34,6 +34,8 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN_KANJI: ${{ secrets.IG_ACCESS_TOKEN_KANJI }}
+          IG_USER_ID_KANJI: ${{ secrets.IG_USER_ID_KANJI }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRY_RUN: ${{ vars.DRY_RUN }}
           MAX_POSTS_PER_DAY: ${{ vars.MAX_POSTS_PER_DAY }}
