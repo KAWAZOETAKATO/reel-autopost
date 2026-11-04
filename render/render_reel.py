@@ -612,19 +612,35 @@ SCENES = {"hook": scene_hook, "points": scene_points, "sheet": scene_sheet, "com
 # ---------------------------------------------------------------- audio
 # BGM：外部の曲・素材は使わず、ここで一から合成する（著作権の問題がない自作曲）
 _NOTE = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
-_PROGS = [[0, 7, 9, 5], [9, 5, 0, 7], [0, 9, 5, 7], [5, 7, 4, 9]]   # 度数（I–V–vi–IV など）
 _MINOR = {9, 4, 2}                                                    # vi・iii・ii は短三和音
+# 曲の雰囲気（台本の "bgm_style" で選ぶ。省略時は BGM_STYLE_DEFAULT）
+BGM_STYLES = {
+    # 落ち着いたローファイ（最初の版）
+    "lofi":   {"bpm": (84, 88, 92, 96), "progs": [[0, 7, 9, 5], [9, 5, 0, 7], [0, 9, 5, 7], [5, 7, 4, 9]],
+               "lead": "epiano", "arp": "eighth", "arp_amp": 0.022, "drums": "soft", "oct": 0, "bass": "half"},
+    # A 明るいポップ：ピアノ＋4つ打ち＋手拍子
+    "pop":    {"bpm": (118, 120, 122, 124), "progs": [[0, 7, 9, 5], [0, 5, 7, 5], [5, 0, 7, 9]],
+               "lead": "piano", "arp": "eighth", "arp_amp": 0.035, "drums": "four", "oct": 12, "bass": "eighth"},
+    # B シティポップ風：おしゃれな7th・はねるベース
+    "city":   {"bpm": (108, 110, 112, 114), "progs": [[5, 4, 2, 0], [5, 7, 4, 9], [2, 7, 0, 9]],
+               "lead": "epiano", "arp": "sync", "arp_amp": 0.03, "drums": "funk", "oct": 0, "bass": "funk"},
+    # C ウクレレ風：軽い弦のカッティング＋シェイカー
+    "uke":    {"bpm": (124, 126, 128, 130), "progs": [[0, 5, 7, 0], [0, 7, 5, 7], [0, 9, 5, 7]],
+               "lead": "pluck", "arp": "strum", "arp_amp": 0.045, "drums": "shaker", "oct": 12, "bass": "half"},
+    # D ピコピコ（チップチューン風）：元気な電子音
+    "chip":   {"bpm": (126, 128, 130, 132), "progs": [[0, 7, 9, 5], [0, 5, 0, 7], [9, 5, 0, 7]],
+               "lead": "square", "arp": "sixteenth", "arp_amp": 0.03, "drums": "four", "oct": 12, "bass": "eighth"},
+}
+BGM_STYLE_DEFAULT = "city"   # 2026-11-04 社長がB案（シティポップ風）に決定
 
 
-def synth_bgm(total: float, seed: str = "", sr: int = 48000) -> np.ndarray:
-    """落ち着いたローファイ風のBGM（エレピの和音・ベース・アルペジオ・軽いリズム）。
-
-    台本の id から調・コード進行・テンポを決めるので、リールごとに少しずつ違う曲になる。
-    """
+def synth_bgm(total: float, seed: str = "", sr: int = 48000, style: str | None = None) -> np.ndarray:
+    """BGMを合成する。台本の id から調・コード進行・テンポを決めるので、リールごとに少しずつ違う曲になる。"""
+    st = BGM_STYLES.get(style or BGM_STYLE_DEFAULT, BGM_STYLES["lofi"])
     h = sum(ord(c) * (i + 1) for i, c in enumerate(seed or "reel"))
     key = _NOTE["CDFGA"[h % 5]]
-    prog = _PROGS[(h // 5) % len(_PROGS)]
-    bpm = (84, 88, 92, 96)[(h // 20) % 4]
+    prog = st["progs"][(h // 5) % len(st["progs"])]
+    bpm = st["bpm"][(h // 20) % len(st["bpm"])]
     beat = 60.0 / bpm
     n = int(total * sr) + sr
     out = np.zeros(n, dtype=np.float32)
@@ -633,11 +649,14 @@ def synth_bgm(total: float, seed: str = "", sr: int = 48000) -> np.ndarray:
     def hz(midi):
         return 440.0 * 2 ** ((midi - 69) / 12)
 
-    def note(f, dur, amp, decay, harm=(1.0, 0.35, 0.12), detune=0.0):
+    def note(f, dur, amp, decay, harm=(1.0, 0.35, 0.12), detune=0.0, square=False):
         m = int(dur * sr)
         tt = np.arange(m) / sr
-        w = sum(a * np.sin(2 * np.pi * f * (k + 1) * (1 + detune) * tt) for k, a in enumerate(harm))
-        env = np.minimum(1, tt / 0.012) * np.exp(-tt * decay)
+        if square:
+            w = np.sign(np.sin(2 * np.pi * f * tt)) * 0.6
+        else:
+            w = sum(a * np.sin(2 * np.pi * f * (k + 1) * (1 + detune) * tt) for k, a in enumerate(harm))
+        env = np.minimum(1, tt / 0.008) * np.exp(-tt * decay)
         env *= np.minimum(1, (dur - tt) / 0.03)    # 終わりを少しずつ消す（プツッという音を防ぐ）
         return (w * env * amp).astype(np.float32)
 
@@ -647,36 +666,92 @@ def synth_bgm(total: float, seed: str = "", sr: int = 48000) -> np.ndarray:
             j = min(n, i + len(sig))
             out[i:j] += sig[: j - i]
 
+    def noise(dur, amp, decay, smooth=1):
+        m = int(dur * sr)
+        x = rng.uniform(-1, 1, m + smooth)
+        x = np.diff(x, n=1)[:m] if smooth == 1 else x[:m]
+        return (x * np.exp(-np.arange(m) / sr * decay) * amp).astype(np.float32)
+
     m = int(0.22 * sr)
     tt = np.arange(m) / sr
-    kick = (np.sin(2 * np.pi * np.cumsum(np.linspace(110, 45, m)) / sr) * np.exp(-tt * 18) * 0.5).astype(np.float32)
-    hat_n = int(0.04 * sr)
-    hat = (np.diff(rng.uniform(-1, 1, hat_n + 1)) * np.exp(-np.arange(hat_n) / sr * 90) * 0.05).astype(np.float32)
+    kick = (np.sin(2 * np.pi * np.cumsum(np.linspace(120, 45, m)) / sr) * np.exp(-tt * 18) * 0.55).astype(np.float32)
+    hat = noise(0.04, 0.05, 90)
+    clap = (noise(0.12, 0.09, 30, smooth=0) * 0.8).astype(np.float32)
+    shaker = noise(0.06, 0.035, 60)
 
+    lead = st["lead"]
+    harm = {"epiano": (1.0, 0.35, 0.12), "piano": (1.0, 0.5, 0.25, 0.1), "pluck": (1.0, 0.6, 0.3, 0.15)}.get(lead, (1.0,))
     bar, t = 0, 0.0
     while t < total + beat * 4:
         deg = prog[bar % 4]
-        root = 48 + key + deg                      # C3 付近
-        third = 3 if deg in _MINOR else 4
-        chord = [root + 12, root + 12 + third, root + 19, root + 23 - (1 if deg in _MINOR else 0)]  # 7th
-        for k, mn in enumerate(chord):             # エレピの和音（小節頭）
-            add(t + k * 0.012, note(hz(mn), beat * 4, 0.05, 0.9, detune=0.0015 * (k - 1.5)))
-        add(t, note(hz(root - 12), beat * 2, 0.13, 1.4, harm=(1.0, 0.2)))          # ベース
-        add(t + beat * 2.5, note(hz(root - 12 + 7), beat * 1.5, 0.09, 1.8, harm=(1.0, 0.2)))
+        root = 48 + key + deg
+        minor = deg in _MINOR
+        third = 3 if minor else 4
+        top = root + 12 + st["oct"]
+        chord = [top, top + third, top + 7, top + (10 if minor else 11)]
+        # 和音
+        if st["arp"] == "strum":                    # ウクレレ風のカッティング（ジャ・ジャ・ジャジャ）
+            for at in (0, 1, 1.5, 2.5, 3):
+                for k, mn in enumerate(chord[:3] + [top + 12]):
+                    add(t + at * beat + k * 0.008, note(hz(mn), beat * 0.45, st["arp_amp"], 7.0, harm=harm))
+        else:
+            hits = (0,) if lead in ("epiano",) else (0, 2) if lead == "piano" else (0, 1.5, 3) if lead == "square" else (0,)
+            for at in hits:
+                for k, mn in enumerate(chord):
+                    add(t + at * beat + k * 0.01, note(hz(mn), beat * (4 if len(hits) == 1 else 2), 0.045, 1.2 if lead != "square" else 4,
+                                                       harm=harm, detune=0.0015 * (k - 1.5), square=(lead == "square" and k == 0)))
+        # ベース
+        if st["bass"] == "half":
+            add(t, note(hz(root - 12), beat * 2, 0.13, 1.4, harm=(1.0, 0.2)))
+            add(t + beat * 2.5, note(hz(root - 5), beat * 1.5, 0.09, 1.8, harm=(1.0, 0.2)))
+        elif st["bass"] == "eighth":
+            for e in range(8):
+                add(t + e * beat / 2, note(hz(root - 12 + (12 if e % 2 else 0)), beat * 0.45, 0.1, 5, harm=(1.0, 0.3)))
+        else:                                        # funk：はねるベース
+            for at, off in ((0, 0), (0.75, 12), (1.5, 7), (2.5, 0), (3.25, 10), (3.5, 12)):
+                add(t + at * beat, note(hz(root - 12 + off), beat * 0.4, 0.12, 6, harm=(1.0, 0.35)))
+        # アルペジオ
         arp = [chord[0] + 12, chord[1] + 12, chord[2] + 12, chord[1] + 12]
-        for e in range(8):                         # 8分のアルペジオ（小さめ）
-            add(t + e * beat / 2 + 0.01, note(hz(arp[e % 4]), beat * 0.6, 0.022, 6.0, harm=(1.0, 0.5, 0.25)))
-        for b in range(4):                         # 軽いリズム
-            if b in (0, 2):
+        if st["arp"] in ("eighth", "sixteenth"):
+            steps = 8 if st["arp"] == "eighth" else 16
+            for e in range(steps):
+                add(t + e * beat * 4 / steps + 0.01, note(hz(arp[e % 4]), beat * 0.5, st["arp_amp"], 8.0,
+                                                          harm=(1.0, 0.5, 0.25), square=(lead == "square")))
+        elif st["arp"] == "sync":
+            for at, k in ((0.5, 0), (1.25, 2), (2, 1), (2.75, 3), (3.5, 2)):
+                add(t + at * beat, note(hz(arp[k]), beat * 0.4, st["arp_amp"], 7.0, harm=(1.0, 0.4)))
+        # リズム
+        for b in range(4):
+            d = st["drums"]
+            if d == "soft":
+                if b in (0, 2):
+                    add(t + b * beat, kick)
+                add(t + b * beat + beat / 2, hat)
+            elif d == "four":
                 add(t + b * beat, kick)
-            add(t + b * beat + beat / 2, hat)
+                add(t + b * beat + beat / 2, hat * 1.4)
+                if b in (1, 3):
+                    add(t + b * beat, clap)
+            elif d == "funk":
+                if b in (0, 2):
+                    add(t + b * beat, kick)
+                if b == 2:
+                    add(t + b * beat + beat * 0.75, kick * 0.7)
+                if b in (1, 3):
+                    add(t + b * beat, clap)
+                for q in range(4):
+                    add(t + b * beat + q * beat / 4, hat * (1.0 if q % 2 else 0.5))
+            elif d == "shaker":
+                if b in (0, 2):
+                    add(t + b * beat, kick * 0.8)
+                for q in range(4):
+                    add(t + b * beat + q * beat / 4, shaker * (1.0 if q % 2 else 0.6))
         t += beat * 4
         bar += 1
 
     out = out[: int(total * sr)]
-    # 高音を少しなめらかに（簡単なローパス）
-    out = np.convolve(out, np.ones(6, dtype=np.float32) / 6, mode="same").astype(np.float32)
-    fade_in, fade_out = int(0.6 * sr), int(1.8 * sr)
+    out = np.convolve(out, np.ones(4, dtype=np.float32) / 4, mode="same").astype(np.float32)
+    fade_in, fade_out = int(0.4 * sr), int(1.6 * sr)
     out[:fade_in] *= np.linspace(0, 1, fade_in)
     out[-fade_out:] *= np.linspace(1, 0, fade_out)
     peak = float(np.max(np.abs(out))) or 1.0
@@ -844,7 +919,7 @@ def render(script_path: Path, out_dir: Path) -> dict:
     proc.stdin.close()
     if proc.wait():
         raise RuntimeError("動画のエンコードに失敗しました")
-    bgm = synth_bgm(total, spec.get("id", "")) if spec.get("bgm", True) else None
+    bgm = synth_bgm(total, spec.get("id", ""), style=spec.get("bgm_style")) if spec.get("bgm", True) else None
     synth_sfx(ctx.sfx, total, silent, bgm=bgm)
     r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(out_dir / "_video.mp4"), "-i", str(silent),
                         "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
