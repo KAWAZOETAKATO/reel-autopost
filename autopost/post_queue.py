@@ -131,6 +131,12 @@ def process(cfg: Config, notion: Notion, ig: Instagram | None, workdir: Path,
         if cfg.dry_run and p_text(page, "エラー内容").startswith(DRY_MARK):
             summary["skipped"] += 1
             continue
+        client = None if cfg.dry_run else _client(ig, acct)
+        if not cfg.dry_run and client is None:
+            # まだ接続していないアカウントの行は、エラーにせず待たせる（Secretsを入れたら次の回から投稿）
+            log(f"{label}アカウントの投稿設定（{ACCOUNTS[acct][1]} / {ACCOUNTS[acct][2]}）が未設定のため待機：{name}")
+            summary["skipped"] += 1
+            continue
         stage = "準備"
         try:
             if now_jst() - _parse(p_date(page, "予定日時")) > OVERDUE:
@@ -145,9 +151,6 @@ def process(cfg: Config, notion: Notion, ig: Instagram | None, workdir: Path,
                 log(f"{label}アカウントは今日の上限に達したため、明日に回します：{name}")
                 summary["skipped"] += 1
                 continue
-            client = None if cfg.dry_run else _client(ig, acct)
-            if not cfg.dry_run and client is None:
-                raise RuntimeError(f"{label}アカウントの投稿設定（{ACCOUNTS[acct][1]} / {ACCOUNTS[acct][2]}）がGitHubのSecretsにありません")
 
             if not cfg.dry_run:
                 notion.update(pid, {"ステータス": w_status("投稿中")})     # 二重処理の防止

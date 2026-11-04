@@ -431,13 +431,15 @@ class MultiAccountTest(unittest.TestCase):
         labels = [props["アカウント"]["select"]["name"] for _, props in n.created]
         self.assertEqual(labels, ["事務", "漢字"])
 
-    def test_kanji_row_without_secrets_is_error(self):
+    def test_kanji_row_without_secrets_waits_quietly(self):
         main = FakeIG()
-        n = FakeNotion([page("k", "漢字#01", account="漢字")])
+        old = (now_jst() - timedelta(hours=60)).isoformat()
+        n = FakeNotion([page("k", "漢字#01", account="漢字"), page("k2", "漢字#02", account="漢字", due=old)])
         s = self.run_q(cfg(dry=False), n, {"main": main})
         self.assertEqual(main.published, [])
-        self.assertEqual(n.last_status("k"), "エラー")
-        self.assertIn("IG_ACCESS_TOKEN_KANJI", s["errors"][0]["error"])
+        self.assertEqual(n.updates, [])                            # ステータスも変えない（エラー通知を出さない）
+        self.assertEqual(s["skipped"], 2)
+        self.assertEqual(s["errors"], [])
 
     def test_account_key(self):
         from autopost.common import account_key
