@@ -605,8 +605,78 @@ def scene_cta(img, ctx: Ctx, sc: dict, t: float):
         check_box(ctx, text_box(f2, l2, W / 2, end + 50, end2), "締めサブ")
 
 
+def scene_quiz(img, ctx: Ctx, sc: dict, t: float):
+    """テンポの速いクイズ1問：大きな問題 → 減っていく時間バー → 答えがはじける。
+
+    {"type": "quiz", "dur": 2.6, "q": "蝸牛", "a": "かたつむり", "no": 1, "of": 5,
+     "reveal_at": 1.6, "label": "読める？", "note": "出典：デジタル大辞泉"}
+    """
+    th = ctx.theme
+    d = ImageDraw.Draw(img, "RGBA")
+    dur = float(sc["dur"])
+    reveal = float(sc.get("reveal_at", dur * 0.6))
+    # 問題番号（例：3 / 5）
+    if sc.get("no"):
+        fb = font(54, "Black")
+        label = f"{sc['no']}" + (f" / {sc['of']}" if sc.get("of") else "")
+        w = fb.getlength(label) + 70
+        rounded(d, [W / 2 - w / 2, 300, W / 2 + w / 2, 392], 46, fill=rgb(th["accent"], 255))
+        d.text((W / 2 - fb.getlength(label) / 2, 314), label, font=fb, fill=rgb("#ffffff"))
+    if sc.get("label"):
+        f, l, sz = ctx.fit(sc["label"], 820, 120, 60, 40, "Bold", 1.2, 1, "クイズの見出し")
+        draw_lines(img, ctx, f, l, sz, W / 2, 430, rgb(th["sub"]), rgb(th["mark"]), 1.2)
+    # 問題のカード
+    pin = ease_back(progress(t, 0.0, 0.22))
+    card = [SAFE_LEFT + 20, 560, SAFE_RIGHT - 20, 1010]
+    cx = (card[0] + card[2]) / 2
+    if pin > 0:
+        grow = 0.86 + 0.14 * pin
+        hw, hh = (card[2] - card[0]) / 2 * grow, (card[3] - card[1]) / 2 * grow
+        cy = (card[1] + card[3]) / 2
+        rounded(d, [cx - hw, cy - hh, cx + hw, cy + hh], 40, fill=rgb(th["card"], int(255 * min(1, pin))))
+        q = str(sc["q"])
+        size = sc.get("size", 260 if len(q) <= 2 else 210 if len(q) == 3 else 170 if len(q) == 4 else 130)
+        fq = font(int(size * grow), "Black")
+        while fq.getlength(q) > hw * 2 - 60 and fq.size > 60:
+            fq = font(fq.size - 6, "Black")
+        bb = d.textbbox((0, 0), q, font=fq)
+        d.text((cx - (bb[2] - bb[0]) / 2 - bb[0], cy - (bb[3] - bb[1]) / 2 - bb[1]), q, font=fq,
+               fill=rgb(th["card_text"], 255))
+        if abs(t - 0.02) < 1 / FPS:
+            ctx.sfx.append((sc["_start"] + 0.02, "pop"))
+    # 時間バー（答えが出るまで減っていく）
+    if t < reveal:
+        left = 1 - clamp(t / reveal)
+        bar = [card[0], 1050, card[2], 1076]
+        rounded(d, bar, 13, fill=rgb(th["sub"], 70))
+        rounded(d, [bar[0], bar[1], bar[0] + (bar[2] - bar[0]) * left, bar[3]], 13,
+                fill=rgb(th["warn"] if left < 0.35 else th["mark"], 255))
+        for k in range(1, int(reveal / 0.5) + 1):              # 0.5秒ごとにカチッ
+            if abs(t - k * 0.5) < 1 / FPS and k * 0.5 < reveal:
+                ctx.sfx.append((sc["_start"] + k * 0.5, "tick"))
+    else:
+        pa = ease_back(progress(t, reveal, 0.25))
+        if abs(t - reveal) < 1 / FPS:
+            ctx.sfx.append((sc["_start"] + reveal, "ding"))
+        fa = font(int(120 * (0.6 + 0.4 * pa)), "Black")
+        a = str(sc["a"])
+        while fa.getlength(a) > SAFE_RIGHT_LOW - SAFE_LEFT - 40 and fa.size > 50:
+            fa = font(fa.size - 4, "Black")
+        bb = d.textbbox((0, 0), a, font=fa)
+        w, hgt = bb[2] - bb[0], bb[3] - bb[1]
+        box = [W / 2 - w / 2 - 44, 1100, W / 2 + w / 2 + 44, 1100 + hgt + 64]
+        rounded(d, box, 30, fill=rgb(th["accent"], int(255 * clamp(pa))))
+        d.text((W / 2 - w / 2 - bb[0], 1100 + 32 - bb[1]), a, font=fa, fill=rgb("#ffffff", int(255 * clamp(pa))))
+        if sc.get("note") and t > reveal + 0.15:
+            fn = font(40, "Bold")
+            n = str(sc["note"])
+            d.text((W / 2 - fn.getlength(n) / 2, 1330), n, font=fn, fill=rgb(th["sub"], 230))
+        if t > reveal + 0.3:
+            check_box(ctx, box, "クイズの答え")
+
+
 SCENES = {"hook": scene_hook, "points": scene_points, "sheet": scene_sheet, "compare": scene_compare,
-          "cta": scene_cta}
+          "cta": scene_cta, "quiz": scene_quiz}
 
 
 # ---------------------------------------------------------------- audio
@@ -841,8 +911,37 @@ def _synth_wa(total: float, seed: str = "", sr: int = 48000) -> np.ndarray:
     return (out / peak * 0.32).astype(np.float32)
 
 
+# 読み上げ音声：pyopenjtalk（オフラインの日本語音声合成。台本の scenes[].say に書いた文を読む）
+def synth_voice(lines: list[tuple[float, str, float]], total: float, sr: int = 48000,
+                speed: float = 1.15, warn=None) -> np.ndarray | None:
+    """lines = [(開始秒, 文, その場面の終わりの秒)]。声のトラック（48kHz）を返す。使えなければ None。"""
+    if not lines:
+        return None
+    try:
+        import pyopenjtalk
+    except Exception:
+        if warn is not None:
+            warn.append("読み上げ（say）がありますが、pyopenjtalk が入っていないため声なしで作りました")
+        return None
+    out = np.zeros(int(total * sr) + sr, dtype=np.float32)
+    for at, text, end in lines:
+        x, vsr = pyopenjtalk.tts(text, speed=speed)
+        x = x.astype(np.float32) / 32768.0
+        if vsr != sr:
+            idx = np.arange(0, len(x), vsr / sr)
+            x = np.interp(idx, np.arange(len(x)), x).astype(np.float32)
+        if warn is not None and at + len(x) / sr > end + 0.15:
+            warn.append(f"読み上げが場面の長さを超えます（{text[:12]}… {len(x) / sr:.1f}秒）")
+        i = int(at * sr)
+        j = min(len(out), i + len(x))
+        out[i:j] += x[: j - i]
+    out = out[: int(total * sr)]
+    peak = float(np.max(np.abs(out))) or 1.0
+    return out / peak * 0.85
+
+
 def synth_sfx(events: list[tuple[float, str]], total: float, path: Path, sr: int = 48000,
-              bgm: np.ndarray | None = None):
+              bgm: np.ndarray | None = None, voice: np.ndarray | None = None):
     """著作権の問題がない、自作の効果音（＋自作BGM）の音声トラックを作る。"""
     audio = np.zeros(int(total * sr) + sr, dtype=np.float32)
 
@@ -872,7 +971,14 @@ def synth_sfx(events: list[tuple[float, str]], total: float, path: Path, sr: int
             audio[i:j] += s[: j - i]
     audio = audio[: int(total * sr)]
     if bgm is not None:
-        audio[: len(bgm)] += bgm[: len(audio)]
+        bgm = bgm[: len(audio)].copy()
+        if voice is not None:                      # 声の間はBGMを小さくする（ダッキング）
+            env = np.abs(voice[: len(bgm)])
+            env = np.convolve(env, np.ones(int(0.25 * sr)) / (0.25 * sr), mode="same")
+            bgm[: len(env)] *= 1 - 0.55 * np.clip(env / (env.max() or 1) * 3, 0, 1)
+        audio[: len(bgm)] += bgm
+    if voice is not None:
+        audio[: len(voice)] += voice[: len(audio)] * 0.9
     rms = float(np.sqrt(np.mean(audio ** 2))) if len(audio) else 0.0
     if rms > 1e-6:                                # スマホで聞きやすい音量にそろえる（目安 -16 LUFS 前後）
         audio = audio * (0.17 / rms)
@@ -896,7 +1002,13 @@ def build_caption(spec: dict) -> str:
     post = spec.get("post", {})
     tags = spec.get("hashtags", [])[:5]
     caption = spec.get("caption", "").strip()
+    voiced = spec.get("voice", True) and any(sc.get("say") or sc.get("say_answer") for sc in spec.get("scenes", []))
+    if voiced and VOICE_NOTE not in caption:
+        caption += "\n\n" + VOICE_NOTE             # 合成音声を使ったことを明記する
     return caption + "\n\n" + post.get("footer", CAPTION_FOOTER) + ("\n\n" + " ".join(tags) if tags else "")
+
+
+VOICE_NOTE = "※ナレーションは合成音声です。"
 
 
 def write_post_info(spec: dict, out_dir: Path) -> Path:
@@ -960,13 +1072,14 @@ def render(script_path: Path, out_dir: Path) -> dict:
     # 読む速さのチェック（1秒あたりの文字数）
     reading = []
     for i, sc in enumerate(scenes):
-        text = "".join(str(sc.get(k, "")) for k in ("text", "sub", "title", "note", "before", "after"))
+        text = "".join(str(sc.get(k, "")) for k in ("text", "sub", "title", "note", "before", "after", "q", "a", "label"))
         text += "".join(sc.get("items", []))
         n = len(re.sub(r"[\s*\n]", "", text))
         cps = n / float(sc["dur"])
         reading.append({"scene": i + 1, "type": sc["type"], "chars": n, "seconds": sc["dur"],
                         "chars_per_sec": round(cps, 1)})
-        if cps > 7.5:
+        limit = 11.0 if (sc.get("say") and spec.get("voice", True)) else 7.5   # 読み上げがある場面は耳でも追える
+        if cps > limit:
             ctx.warnings.append(f"場面{i + 1}は文字が多く、読み切れない可能性（{cps:.1f}字/秒）")
     video = out_dir / "reel.mp4"
     silent = out_dir / "_sfx.wav"
@@ -1003,7 +1116,16 @@ def render(script_path: Path, out_dir: Path) -> dict:
     if proc.wait():
         raise RuntimeError("動画のエンコードに失敗しました")
     bgm = synth_bgm(total, spec.get("id", ""), style=spec.get("bgm_style")) if spec.get("bgm", True) else None
-    synth_sfx(ctx.sfx, total, silent, bgm=bgm)
+    lines = []
+    if spec.get("voice", True):
+        for sc in scenes:
+            if sc.get("say"):
+                lines.append((sc["_start"] + float(sc.get("say_at", 0.05)), sc["say"], sc["_start"] + float(sc["dur"])))
+            if sc.get("say_answer"):                # クイズ：答えが出た瞬間に読む
+                at = sc["_start"] + float(sc.get("reveal_at", float(sc["dur"]) * 0.6)) + 0.02
+                lines.append((at, sc["say_answer"], sc["_start"] + float(sc["dur"])))
+    voice = synth_voice(lines, total, speed=float(spec.get("voice_speed", 1.15)), warn=ctx.warnings)
+    synth_sfx(ctx.sfx, total, silent, bgm=bgm, voice=voice)
     r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(out_dir / "_video.mp4"), "-i", str(silent),
                         "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
                         "-ar", "48000", "-shortest", "-movflags", "+faststart", str(video)],
