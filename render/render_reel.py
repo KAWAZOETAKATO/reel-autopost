@@ -631,11 +631,14 @@ BGM_STYLES = {
     "chip":   {"bpm": (126, 128, 130, 132), "progs": [[0, 7, 9, 5], [0, 5, 0, 7], [9, 5, 0, 7]],
                "lead": "square", "arp": "sixteenth", "arp_amp": 0.03, "drums": "four", "oct": 12, "bass": "eighth"},
 }
+BGM_STYLES["wa"] = {"bpm": (84, 88, 92), "progs": [[0]], "lead": "koto"}   # 和風：琴・尺八・拍子木
 BGM_STYLE_DEFAULT = "city"   # 2026-11-04 社長がB案（シティポップ風）に決定
 
 
 def synth_bgm(total: float, seed: str = "", sr: int = 48000, style: str | None = None) -> np.ndarray:
     """BGMを合成する。台本の id から調・コード進行・テンポを決めるので、リールごとに少しずつ違う曲になる。"""
+    if (style or BGM_STYLE_DEFAULT) == "wa":
+        return _synth_wa(total, seed, sr)
     st = BGM_STYLES.get(style or BGM_STYLE_DEFAULT, BGM_STYLES["lofi"])
     h = sum(ord(c) * (i + 1) for i, c in enumerate(seed or "reel"))
     key = _NOTE["CDFGA"[h % 5]]
@@ -756,6 +759,86 @@ def synth_bgm(total: float, seed: str = "", sr: int = 48000, style: str | None =
     out[-fade_out:] *= np.linspace(1, 0, fade_out)
     peak = float(np.max(np.abs(out))) or 1.0
     return (out / peak * 0.32).astype(np.float32)   # 効果音より控えめ
+
+
+def _synth_wa(total: float, seed: str = "", sr: int = 48000) -> np.ndarray:
+    """和風のBGM：琴の旋律（都節の音階）＋尺八の長い音＋低い琴の支え＋拍子木。"""
+    h = sum(ord(c) * (i + 1) for i, c in enumerate(seed or "wa"))
+    rng = np.random.default_rng(h)
+    bpm = BGM_STYLES["wa"]["bpm"][h % 3]
+    beat = 60.0 / bpm
+    key = 62 + (0, 2, -3)[(h // 3) % 3]                   # D・E・B あたり
+    scale = [0, 1, 5, 7, 8]                               # 都節音階（ミ・ファ・ラ・シ・ド）
+    n = int(total * sr) + sr
+    out = np.zeros(n, dtype=np.float32)
+
+    def add(at, sig):
+        i = int(at * sr)
+        if 0 <= i < n:
+            j = min(n, i + len(sig))
+            out[i:j] += sig[: j - i]
+
+    def hz(m):
+        return 440.0 * 2 ** ((m - 69) / 12)
+
+    def koto(f, dur, amp):
+        m = int(dur * sr)
+        tt = np.arange(m) / sr
+        bend = 1 + 0.006 * np.exp(-tt * 25)               # はじいた直後に少し高い
+        ph = 2 * np.pi * np.cumsum(f * bend) / sr
+        w = np.sin(ph) + 0.55 * np.sin(2 * ph) * np.exp(-tt * 6) + 0.3 * np.sin(3 * ph) * np.exp(-tt * 9) \
+            + 0.15 * np.sin(5 * ph) * np.exp(-tt * 14)
+        env = np.minimum(1, tt / 0.003) * np.exp(-tt * (3.2 if dur < 3 else 0.9))
+        env *= np.minimum(1, (dur - tt) / 0.03)
+        return (w * env * amp).astype(np.float32)
+
+    def shaku(f, dur, amp):
+        m = int(dur * sr)
+        tt = np.arange(m) / sr
+        vib = 1 + 0.004 * np.sin(2 * np.pi * 5.2 * tt) * np.minimum(1, tt / 0.6)
+        ph = 2 * np.pi * np.cumsum(f * vib) / sr
+        breath = np.convolve(rng.uniform(-1, 1, m), np.ones(30) / 30, mode="same")
+        w = np.sin(ph) + 0.12 * np.sin(2 * ph) + 0.25 * breath
+        env = np.minimum(1, tt / 0.25) * np.minimum(1, (dur - tt) / 0.5)
+        return (w * env * amp).astype(np.float32)
+
+    m = int(0.05 * sr)
+    tt = np.arange(m) / sr
+    clack = (np.sin(2 * np.pi * 1900 * tt) * np.exp(-tt * 140) * 0.25).astype(np.float32)   # 拍子木
+    m = int(0.5 * sr)
+    tt = np.arange(m) / sr
+    taiko = (np.sin(2 * np.pi * np.cumsum(np.linspace(95, 55, m)) / sr) * np.exp(-tt * 7) * 0.35).astype(np.float32)
+
+    step = beat / 2
+    t, k, bar = 0.0, 0, 0
+    deg = 2
+    while t < total + beat * 4:
+        # 2小節ごとに、低い琴の和音（根音＋5度）と太鼓
+        if k % 16 == 0:
+            add(t, koto(hz(key - 12), beat * 8.5, 0.10))
+            add(t + 0.02, koto(hz(key - 5), beat * 8.5, 0.06))
+            add(t, taiko)
+            if bar % 2 == 0:                               # 尺八の長い音
+                add(t + beat, shaku(hz(key + scale[[2, 3, 4][bar // 2 % 3]]), beat * 5, 0.035))
+            bar += 1
+        # 琴の旋律：音階の上を近い音へ動く。ときどき休む
+        if rng.random() > (0.28 if k % 2 else 0.12):
+            deg = int(np.clip(deg + rng.choice([-2, -1, -1, 1, 1, 2]), 0, 9))
+            mn = key + scale[deg % 5] + 12 * (deg // 5)
+            add(t, koto(hz(mn), beat * 1.6, 0.055))
+            if k % 8 == 6 and rng.random() < 0.5:          # 装飾の二音
+                add(t + step / 2, koto(hz(mn + 12), beat, 0.03))
+        if k % 8 == 4:
+            add(t, clack)
+        t += step
+        k += 1
+
+    out = out[: int(total * sr)]
+    fade_in, fade_out = int(0.3 * sr), int(1.6 * sr)
+    out[:fade_in] *= np.linspace(0, 1, fade_in)
+    out[-fade_out:] *= np.linspace(1, 0, fade_out)
+    peak = float(np.max(np.abs(out))) or 1.0
+    return (out / peak * 0.32).astype(np.float32)
 
 
 def synth_sfx(events: list[tuple[float, str]], total: float, path: Path, sr: int = 48000,
