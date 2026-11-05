@@ -355,11 +355,12 @@ def scene_sheet(img, ctx: Ctx, sc: dict, t: float):
     rn_w = 64
     total_w = x_right - x_left - rn_w
     col_w = [total_w * w / sum(widths) for w in widths]
-    row_h = sc.get("row_h", 70)
+    big = len(sc.get("rows", [])) <= 6 and sc.get("big", True)   # 小さな表は大きく見せる（スマホで読みやすく）
+    row_h = sc.get("row_h", 104 if big else 70)
     # 数式バーの文字サイズと改行（長い数式は2行に）
     formula = sc.get("formula", "")
     avail = (x_right - x_left) - 110
-    fx_font = font(40, "Bold")
+    fx_font = font(50 if big else 40, "Bold")
     while formula and fx_font.getlength(formula) > avail and fx_font.size > 30:
         fx_font = font(fx_font.size - 2, "Bold")
     fx_lines = [formula]
@@ -385,8 +386,8 @@ def scene_sheet(img, ctx: Ctx, sc: dict, t: float):
     if pp < 0.05:
         return
     a = int(255 * pp)
-    cell_f = font(sc.get("cell_size", 38), "Medium")
-    head_f = font(30, "Bold")
+    cell_f = font(sc.get("cell_size", 56 if big else 38), "Medium")
+    head_f = font(36 if big else 30, "Bold")
     # 数式バー
     typing_start, typing_len = sc.get("type_at", 0.9), sc.get("type_len", 1.4)
     formula = sc.get("formula", "")
@@ -447,7 +448,7 @@ def scene_sheet(img, ctx: Ctx, sc: dict, t: float):
                 continue
             text = str(val)
             is_header = r == 0 and sc.get("header_row", True)
-            fnt = font(sc.get("cell_size", 38), "Bold") if is_header else cell_f
+            fnt = font(sc.get("cell_size", 56 if big else 38), "Bold") if is_header else cell_f
             while fnt.getlength(text) > col_w[c] - 16 and fnt.size > 22:
                 fnt = font(fnt.size - 2, "Bold" if is_header else "Medium")
             if fnt.getlength(text) > col_w[c] - 16:
@@ -469,7 +470,7 @@ def scene_sheet(img, ctx: Ctx, sc: dict, t: float):
             pe = ease_back(progress(t, entered_at, 0.35))
             d.rectangle(tbox, fill=rgb(th["accent"], int(60 * (1 - progress(t, entered_at + 0.5, 0.8)))))
             res = str(sc.get("result", ""))
-            rf = font(int(sc.get("cell_size", 38) * (0.7 + 0.3 * pe)) + 2, "Black")
+            rf = font(int(sc.get("cell_size", 56 if big else 38) * (0.7 + 0.3 * pe)) + 2, "Black")
             while rf.getlength(res) > col_w[tc] - 16 and rf.size > 22:
                 rf = font(rf.size - 2, "Black")
             numeric = bool(re.fullmatch(r"[-¥$0-9,.%/]+", res))
@@ -478,7 +479,7 @@ def scene_sheet(img, ctx: Ctx, sc: dict, t: float):
             if abs(t - entered_at) < 1 / FPS:
                 ctx.sfx.append((sc["_start"] + entered_at, "ding"))
         elif formula and n_typed:
-            sf = font(28, "Medium")
+            sf = font(38 if big else 28, "Medium")
             vis = formula[:n_typed]
             while vis and sf.getlength(vis) > col_w[tc] - 20:  # 入力中の数式はセルの枠内に収める
                 vis = vis[1:]
@@ -495,7 +496,7 @@ def scene_sheet(img, ctx: Ctx, sc: dict, t: float):
         box = [gx[c], gy[r + 1], gx[c + 1], gy[r + 2]]
         d.rectangle(box, fill=rgb(th["accent"], int(40 * ps)))
         text = str(val)
-        sf = font(sc.get("cell_size", 38), "Bold")
+        sf = font(sc.get("cell_size", 56 if big else 38), "Bold")
         while sf.getlength(text) > col_w[c] - 16 and sf.size > 22:
             sf = font(sf.size - 2, "Bold")
         numeric = bool(re.fullmatch(r"[-¥$0-9,.%/]+", text))
@@ -675,6 +676,27 @@ def scene_quiz(img, ctx: Ctx, sc: dict, t: float):
             check_box(ctx, box, "クイズの答え")
 
 
+def _wrap_jp(text: str, fnt, max_w: float) -> list[str]:
+    """日本語の折り返し：句読点や閉じかっこで行を始めない・開きかっこで行を終えない・英単語の途中で切らない。"""
+    lines, cur = [], ""
+    for ch in text:
+        if fnt.getlength(cur + ch) <= max_w or ch in "、。」）！？":
+            cur += ch
+            continue
+        cut = len(cur)
+        if ch.isascii() and ch.isalnum():
+            m = re.search(r"[A-Za-z0-9]+$", cur)
+            if m and m.start() > 0:
+                cut = m.start()
+        if cut > 0 and cur[cut - 1] in "「（":
+            cut -= 1
+        lines.append(cur[:cut])
+        cur = cur[cut:] + ch
+    if cur:
+        lines.append(cur)
+    return lines
+
+
 def scene_chat(img, ctx: Ctx, sc: dict, t: float):
     """AIへの頼み方を見せる：自分の吹き出し（打ち込み）→ AIの答え（行ごとに出る）。
 
@@ -705,16 +727,7 @@ def scene_chat(img, ctx: Ctx, sc: dict, t: float):
     ta, tl = float(sc.get("type_at", 0.2)), float(sc.get("type_len", 1.0))
     n = int(len(ask) * clamp((t - ta) / tl))
     fa = font(46, "Bold")
-    lines, cur = [], ""
-    for ch in ask[:max(n, 1)] if n else "":
-        if fa.getlength(cur + ch) > 640 and ch not in "、。」）！？":
-            carry = cur[-1] if cur and cur[-1] in "「（" else ""
-            lines.append(cur[:-1] if carry else cur)
-            cur = carry + ch
-        else:
-            cur += ch
-    if cur:
-        lines.append(cur)
+    lines = _wrap_jp(ask[:n], fa, 640) if n else []
     y = card[1] + 120
     if lines:
         bw = max(fa.getlength(x) for x in lines) + 56
@@ -731,17 +744,7 @@ def scene_chat(img, ctx: Ctx, sc: dict, t: float):
     fr = font(44, "Medium")
     shown = [r for k, r in enumerate(reply) if t >= done + k * float(sc.get("line_gap", 0.35))]
     if shown:
-        wrapped = []
-        for r in shown:
-            cur = ""
-            for ch in str(r):
-                if fr.getlength(cur + ch) > 720 and ch not in "、。」）！？":
-                    carry = cur[-1] if cur and cur[-1] in "「（" else ""
-                    wrapped.append(cur[:-1] if carry else cur)
-                    cur = carry + ch
-                else:
-                    cur += ch
-            wrapped.append(cur)
+        wrapped = [ln for r in shown for ln in _wrap_jp(str(r), fr, 720)]
         bh = len(wrapped) * 60 + 36
         bw = max(fr.getlength(x) for x in wrapped) + 56
         rounded(d, [card[0] + 36, y, card[0] + 36 + bw, y + bh], 28, fill=rgb(th["header"], 255))
