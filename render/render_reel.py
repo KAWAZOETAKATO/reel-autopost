@@ -675,8 +675,89 @@ def scene_quiz(img, ctx: Ctx, sc: dict, t: float):
             check_box(ctx, box, "クイズの答え")
 
 
+def scene_chat(img, ctx: Ctx, sc: dict, t: float):
+    """AIへの頼み方を見せる：自分の吹き出し（打ち込み）→ AIの答え（行ごとに出る）。
+
+    {"type": "chat", "dur": 4.5, "no": 1, "of": 3, "title": "メールの下書き",
+     "ask": "納期が1日遅れるお詫びメールを丁寧に", "reply": ["件名：納品日のご相談", "いつもお世話に…", "…"]}
+    特定のサービスの画面・ロゴは描かない（一般的なチャット画面）。
+    """
+    th = ctx.theme
+    d = ImageDraw.Draw(img, "RGBA")
+    if sc.get("no"):
+        fb = font(50, "Black")
+        label = f"{sc['no']}" + (f" / {sc['of']}" if sc.get("of") else "")
+        w = fb.getlength(label) + 64
+        rounded(d, [SAFE_LEFT, 330, SAFE_LEFT + w, 414], 42, fill=rgb(th["accent"], 255))
+        d.text((SAFE_LEFT + 32, 342), label, font=fb, fill=rgb("#ffffff"))
+    if sc.get("title"):
+        f, l, sz = ctx.fit(sc["title"], 860 - (200 if sc.get("no") else 0), 140, 66, 44, "Black", 1.2, 2, "チャットの見出し")
+        x = SAFE_LEFT + (230 if sc.get("no") else 0)
+        draw_lines(img, ctx, f, l, sz, x + (SAFE_RIGHT - x) / 2, 334, rgb(th["text"]), rgb(th["mark"]), 1.2)
+    # 画面（カード）
+    card = [SAFE_LEFT, 470, SAFE_RIGHT, 1330]
+    rounded(d, card, 34, fill=rgb(th["card"], 255))
+    fh = font(34, "Bold")
+    d.text((card[0] + 36, card[1] + 26), "AIチャット", font=fh, fill=rgb(th["card_text"], 150))
+    d.line([card[0], card[1] + 84, card[2], card[1] + 84], fill=rgb(th["grid"], 255), width=2)
+    # 自分の吹き出し（右）
+    ask = str(sc["ask"])
+    ta, tl = float(sc.get("type_at", 0.2)), float(sc.get("type_len", 1.0))
+    n = int(len(ask) * clamp((t - ta) / tl))
+    fa = font(46, "Bold")
+    lines, cur = [], ""
+    for ch in ask[:max(n, 1)] if n else "":
+        if fa.getlength(cur + ch) > 640 and ch not in "、。」）！？":
+            carry = cur[-1] if cur and cur[-1] in "「（" else ""
+            lines.append(cur[:-1] if carry else cur)
+            cur = carry + ch
+        else:
+            cur += ch
+    if cur:
+        lines.append(cur)
+    y = card[1] + 120
+    if lines:
+        bw = max(fa.getlength(x) for x in lines) + 56
+        bh = len(lines) * 62 + 36
+        rounded(d, [card[2] - 36 - bw, y, card[2] - 36, y + bh], 28, fill=rgb(th["accent"], 255))
+        for i, ln in enumerate(lines):
+            d.text((card[2] - 36 - bw + 28, y + 18 + i * 62), ln, font=fa, fill=rgb("#ffffff"))
+        if n < len(ask) and int(t * FPS) % 3 == 0:
+            ctx.sfx.append((sc["_start"] + t, "key"))
+        y += bh + 34
+    # AIの答え（左）：打ち終わってから1行ずつ
+    done = ta + tl + 0.25
+    reply = sc.get("reply", [])
+    fr = font(44, "Medium")
+    shown = [r for k, r in enumerate(reply) if t >= done + k * float(sc.get("line_gap", 0.35))]
+    if shown:
+        wrapped = []
+        for r in shown:
+            cur = ""
+            for ch in str(r):
+                if fr.getlength(cur + ch) > 720 and ch not in "、。」）！？":
+                    carry = cur[-1] if cur and cur[-1] in "「（" else ""
+                    wrapped.append(cur[:-1] if carry else cur)
+                    cur = carry + ch
+                else:
+                    cur += ch
+            wrapped.append(cur)
+        bh = len(wrapped) * 60 + 36
+        bw = max(fr.getlength(x) for x in wrapped) + 56
+        rounded(d, [card[0] + 36, y, card[0] + 36 + bw, y + bh], 28, fill=rgb(th["header"], 255))
+        for i, ln in enumerate(wrapped):
+            d.text((card[0] + 64, y + 18 + i * 60), ln, font=fr, fill=rgb(th["card_text"], 255))
+        if y + bh > card[3] - 20:
+            ctx.warnings.append(f"AIの答えが画面に収まりません: {sc.get('title', '')}")
+        if abs(t - done) < 1 / FPS:
+            ctx.sfx.append((sc["_start"] + done, "ding"))
+    if sc.get("note") and shown and len(shown) == len(reply):
+        f, l, sz = ctx.fit(sc["note"], 820, 120, 50, 36, "Bold", 1.3, 2, "チャットの補足")
+        draw_lines(img, ctx, f, l, sz, W / 2, card[3] + 30, rgb(th["text"]), rgb(th["mark"]), 1.3)
+
+
 SCENES = {"hook": scene_hook, "points": scene_points, "sheet": scene_sheet, "compare": scene_compare,
-          "cta": scene_cta, "quiz": scene_quiz}
+          "cta": scene_cta, "quiz": scene_quiz, "chat": scene_chat}
 
 
 # ---------------------------------------------------------------- audio
@@ -1072,7 +1153,7 @@ def render(script_path: Path, out_dir: Path) -> dict:
     # 読む速さのチェック（1秒あたりの文字数）
     reading = []
     for i, sc in enumerate(scenes):
-        text = "".join(str(sc.get(k, "")) for k in ("text", "sub", "title", "note", "before", "after", "q", "a", "label"))
+        text = "".join(str(sc.get(k, "")) for k in ("text", "sub", "title", "note", "before", "after", "q", "a", "label", "ask"))
         text += "".join(sc.get("items", []))
         n = len(re.sub(r"[\s*\n]", "", text))
         cps = n / float(sc["dur"])
