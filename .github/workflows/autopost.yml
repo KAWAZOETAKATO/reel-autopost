@@ -29,6 +29,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-noto-cjk fonts-noto-cjk-extra > /dev/null
           pip install -q -r requirements.txt
+      - name: 声（VOICEVOX）の準備を再利用
+        uses: actions/cache@v4
+        with:
+          path: ~/voicevox
+          key: voicevox-0.16.2-046-v1
+      - name: 声（VOICEVOX）を用意（失敗しても標準の声で続ける）
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/setup_voicevox.sh
       - name: 投稿キューを処理
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}

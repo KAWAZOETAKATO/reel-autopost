@@ -996,21 +996,81 @@ def _synth_wa(total: float, seed: str = "", sr: int = 48000) -> np.ndarray:
 
 
 # 読み上げ音声：pyopenjtalk（オフラインの日本語音声合成。台本の scenes[].say に書いた文を読む）
+# VOICEVOX（無料・人の声に近い音声合成）。GitHub Actions で環境変数 VOICEVOX_DIR が設定されていれば使い、
+# なければ pyopenjtalk で代わりに読む。クレジット表記「VOICEVOX:声の名前」が必要（投稿文に自動で入る）。
+VOICEVOX_VOICES = {29: "No.7", 30: "No.7", 31: "No.7", 11: "玄野武宏", 8: "春日部つむぎ", 2: "四国めたん",
+                   3: "ずんだもん", 14: "冥鳴ひまり", 16: "九州そら", 9: "波音リツ"}
+VOICEVOX_DEFAULT_ID = 29
+_VV = {"synth": None, "tried": False}
+
+
+def _voicevox():
+    if _VV["tried"]:
+        return _VV["synth"]
+    _VV["tried"] = True
+    root = os.environ.get("VOICEVOX_DIR")
+    if not root:
+        return None
+    try:
+        import pyopenjtalk
+        from voicevox_core.blocking import Onnxruntime, OpenJtalk, Synthesizer, VoiceModelFile
+        pyopenjtalk.g2p("あ")                                    # 辞書を用意させる（初回はダウンロード）
+        dic = pyopenjtalk.OPEN_JTALK_DICT_DIR
+        dic = dic.decode() if isinstance(dic, bytes) else str(dic)
+        libs = sorted(Path(root).glob("onnxruntime/**/libvoicevox_onnxruntime.so*"))
+        ort = Onnxruntime.load_once(filename=str(libs[0]))
+        syn = Synthesizer(ort, OpenJtalk(dic))
+        for vvm in sorted(Path(root).glob("models/*.vvm")):
+            with VoiceModelFile.open(vvm) as m:
+                syn.load_voice_model(m)
+        _VV["synth"] = syn
+        print("VOICEVOX を使います", flush=True)
+    except Exception as e:                                      # 失敗しても動画づくりは止めない
+        print(f"VOICEVOX を使えなかったため、標準の声で読みます：{e}", flush=True)
+    return _VV["synth"]
+
+
+def voice_credit(spec: dict) -> str:
+    """VOICEVOX で読んだ場合のクレジット表記（使っていなければ空）。"""
+    if _voicevox() is None:                        # 実際に VOICEVOX で読めたときだけ
+        return ""
+    vid = int(spec.get("voice_id", VOICEVOX_DEFAULT_ID))
+    return f"音声：VOICEVOX:{VOICEVOX_VOICES.get(vid, 'VOICEVOX')}"
+
+
+def _tts(text: str, speed: float, voice_id: int) -> tuple[np.ndarray, int]:
+    syn = _voicevox()
+    if syn is not None:
+        try:
+            q = syn.create_audio_query(text, voice_id)
+            q.speed_scale = min(max(speed * 0.92, 0.8), 1.5)
+            q.pre_phoneme_length, q.post_phoneme_length = 0.02, 0.05
+            data = syn.synthesis(q, voice_id)
+            import io
+            with wave.open(io.BytesIO(data)) as w:
+                x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+                return x.astype(np.float32) / 32768.0, w.getframerate()
+        except Exception as e:
+            print(f"VOICEVOX の読み上げに失敗（標準の声で代わりに読む）：{e}", flush=True)
+    import pyopenjtalk
+    x, vsr = pyopenjtalk.tts(text, speed=speed)
+    return x.astype(np.float32) / 32768.0, vsr
+
+
 def synth_voice(lines: list[tuple[float, str, float]], total: float, sr: int = 48000,
-                speed: float = 1.15, warn=None) -> np.ndarray | None:
+                speed: float = 1.15, warn=None, voice_id: int = VOICEVOX_DEFAULT_ID) -> np.ndarray | None:
     """lines = [(開始秒, 文, その場面の終わりの秒)]。声のトラック（48kHz）を返す。使えなければ None。"""
     if not lines:
         return None
     try:
-        import pyopenjtalk
+        import pyopenjtalk  # noqa: F401
     except Exception:
         if warn is not None:
             warn.append("読み上げ（say）がありますが、pyopenjtalk が入っていないため声なしで作りました")
         return None
     out = np.zeros(int(total * sr) + sr, dtype=np.float32)
     for at, text, end in lines:
-        x, vsr = pyopenjtalk.tts(text, speed=speed)
-        x = x.astype(np.float32) / 32768.0
+        x, vsr = _tts(text, speed, voice_id)
         if vsr != sr:
             idx = np.arange(0, len(x), vsr / sr)
             x = np.interp(idx, np.arange(len(x)), x).astype(np.float32)
@@ -1089,6 +1149,9 @@ def build_caption(spec: dict) -> str:
     voiced = spec.get("voice", True) and any(sc.get("say") or sc.get("say_answer") for sc in spec.get("scenes", []))
     if voiced and VOICE_NOTE not in caption:
         caption += "\n\n" + VOICE_NOTE             # 合成音声を使ったことを明記する
+        credit = voice_credit(spec)
+        if credit:
+            caption += "\n" + credit                 # VOICEVOX のクレジット表記（利用規約で必要）
     return caption + "\n\n" + post.get("footer", CAPTION_FOOTER) + ("\n\n" + " ".join(tags) if tags else "")
 
 
@@ -1208,7 +1271,8 @@ def render(script_path: Path, out_dir: Path) -> dict:
             if sc.get("say_answer"):                # クイズ：答えが出た瞬間に読む
                 at = sc["_start"] + float(sc.get("reveal_at", float(sc["dur"]) * 0.6)) + 0.02
                 lines.append((at, sc["say_answer"], sc["_start"] + float(sc["dur"])))
-    voice = synth_voice(lines, total, speed=float(spec.get("voice_speed", 1.15)), warn=ctx.warnings)
+    voice = synth_voice(lines, total, speed=float(spec.get("voice_speed", 1.15)), warn=ctx.warnings,
+                        voice_id=int(spec.get("voice_id", VOICEVOX_DEFAULT_ID)))
     synth_sfx(ctx.sfx, total, silent, bgm=bgm, voice=voice)
     r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(out_dir / "_video.mp4"), "-i", str(silent),
                         "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",

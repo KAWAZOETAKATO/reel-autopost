@@ -1,0 +1,101 @@
+{
+ "id": "kanji_fast_sample",
+ "series": "大人の漢字帖",
+ "bgm_style": "wa",
+ "theme": {
+  "bg_top": "#1e1915",
+  "bg_bottom": "#3b2b22",
+  "text": "#fffaf0",
+  "sub": "#eadbc6",
+  "accent": "#c0392b",
+  "mark": "#f4c95d",
+  "warn": "#d9826b",
+  "card": "#fffaf0",
+  "card_text": "#2a211b",
+  "grid": "#e3d6c4",
+  "header": "#f3ead9"
+ },
+ "scenes": [
+  {
+   "type": "hook",
+   "dur": 2.0,
+   "text": "生き物の漢字\n*5問*読める？",
+   "size": 120,
+   "say": "生き物の漢字、読める？",
+   "say_at": 0.1
+  },
+  {
+   "type": "quiz",
+   "dur": 2.6,
+   "q": "蝸牛",
+   "a": "かたつむり",
+   "no": 1,
+   "of": 5,
+   "reveal_at": 1.4,
+   "say_answer": "かたつむり"
+  },
+  {
+   "type": "quiz",
+   "dur": 2.6,
+   "q": "海月",
+   "a": "くらげ",
+   "no": 2,
+   "of": 5,
+   "reveal_at": 1.4,
+   "say_answer": "くらげ"
+  },
+  {
+   "type": "quiz",
+   "dur": 2.6,
+   "q": "啄木鳥",
+   "a": "きつつき",
+   "no": 3,
+   "of": 5,
+   "reveal_at": 1.4,
+   "say_answer": "きつつき"
+  },
+  {
+   "type": "quiz",
+   "dur": 2.6,
+   "q": "蜻蛉",
+   "a": "とんぼ",
+   "no": 4,
+   "of": 5,
+   "reveal_at": 1.4,
+   "say_answer": "とんぼ"
+  },
+  {
+   "type": "quiz",
+   "dur": 2.6,
+   "q": "蟷螂",
+   "a": "かまきり",
+   "no": 5,
+   "of": 5,
+   "reveal_at": 1.4,
+   "say_answer": "かまきり"
+  },
+  {
+   "type": "cta",
+   "dur": 2.4,
+   "text": "何問読めた？\n*コメント*で",
+   "sub": "毎日出題中",
+   "say": "何問読めた？コメントしてね",
+   "say_at": 0.15
+  }
+ ],
+ "caption": "生き物の漢字、5問。何問読めましたか？\n\n.\n.\n.\n答え：蝸牛（かたつむり）・海月（くらげ）・啄木鳥（きつつき）・蜻蛉（とんぼ）・蟷螂（かまきり）\n読みはデジタル大辞泉で確認しています。",
+ "hashtags": [
+  "#漢字クイズ",
+  "#難読漢字",
+  "#読めそうで読めない漢字",
+  "#大人の教養",
+  "#日本語"
+ ],
+ "post": {
+  "cover_title": "生き物の漢字\n5問読める？",
+  "alt_text": "生き物の難読漢字5問を次々に出題し、答えの読みを表示する動画。",
+  "post_time": "20時台",
+  "footer": "何問読めたか、コメントで教えてください。\n▶ 読めそうで読めない漢字を毎日投稿中 @otona_kanjicho"
+ },
+ "voice_speed": 1.35
+}

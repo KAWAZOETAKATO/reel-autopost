@@ -1,0 +1,59 @@
+# 声の聞き比べ：同じリールを VOICEVOX のいくつかの声で作り、Artifacts に置く（投稿はしない）。
+name: 声の聞き比べ（投稿しない）
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 動画作成に必要なものを入れる
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk fonts-noto-cjk-extra > /dev/null
+          pip install -q -r requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: ~/voicevox
+          key: voicevox-0.16.2-046-v1
+      - name: 声（VOICEVOX）を用意
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/setup_voicevox.sh
+      - name: 声ごとに試作を作る
+        run: |
+          mkdir -p out
+          for id in 29 30 31 11 8 2; do
+            python - "$id" <<'PY'
+          import json, sys
+          vid = sys.argv[1]
+          for name in ("ai_ura3", "kanji_fast"):
+              try:
+                  s = json.load(open(f"examples/{name}.json", encoding="utf-8"))
+              except FileNotFoundError:
+                  continue
+              s["voice_id"] = int(vid)
+              s["id"] = f"{name}_voice{vid}"
+              json.dump(s, open(f"out/{name}_voice{vid}.json", "w", encoding="utf-8"), ensure_ascii=False)
+          PY
+          done
+          for f in out/*.json; do
+            n=$(basename "$f" .json)
+            python render/render_reel.py "$f" "out/$n" > /dev/null
+            cp "out/$n/reel.mp4" "out/$n.mp4"
+          done
+          ls -la out/*.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice-samples
+          path: out/*.mp4
+          retention-days: 7
