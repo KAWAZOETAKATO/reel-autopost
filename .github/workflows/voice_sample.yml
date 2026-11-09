@@ -3,6 +3,11 @@ name: 声の聞き比べ（投稿しない）
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/voice_sample.yml
+      - scripts/setup_voicevox.sh
 
 permissions:
   contents: read
@@ -29,6 +34,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/setup_voicevox.sh
+      - name: VOICEVOX が動くか確かめる（動かなければここで止める）
+        run: |
+          find ~/voicevox -maxdepth 4 | head -30
+          python -c "import voicevox_core, sys; print('voicevox_core', voicevox_core.__file__)"
+          python - <<'PY'
+          import sys, traceback
+          sys.path.insert(0, "render")
+          import render_reel as r
+          syn = r._voicevox()
+          if syn is None:
+              sys.exit("VOICEVOX が使えません（上のメッセージが原因）")
+          for vid in (29, 11, 8):
+              x, sr = r._tts("こんにちは、テストです。", 1.0, vid)
+              print("OK", vid, len(x), sr)
+          PY
       - name: 声ごとに試作を作る
         run: |
           mkdir -p out
@@ -48,7 +68,8 @@ jobs:
           done
           for f in out/*.json; do
             n=$(basename "$f" .json)
-            python render/render_reel.py "$f" "out/$n" > /dev/null
+            python render/render_reel.py "$f" "out/$n" | grep -E "VOICEVOX|警告" || true
+            grep -h "VOICEVOX" "out/$n"/*.md || echo "（$n：クレジット表記なし＝標準の声）"
             cp "out/$n/reel.mp4" "out/$n.mp4"
           done
           ls -la out/*.mp4

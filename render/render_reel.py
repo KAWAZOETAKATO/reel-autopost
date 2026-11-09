@@ -1026,7 +1026,9 @@ def _voicevox():
         _VV["synth"] = syn
         print("VOICEVOX を使います", flush=True)
     except Exception as e:                                      # 失敗しても動画づくりは止めない
-        print(f"VOICEVOX を使えなかったため、標準の声で読みます：{e}", flush=True)
+        import traceback
+        print(f"VOICEVOX を使えなかったため、標準の声で読みます：{e!r}", flush=True)
+        traceback.print_exc()
     return _VV["synth"]
 
 
