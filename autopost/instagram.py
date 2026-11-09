@@ -29,15 +29,30 @@ class Instagram:
         return self._http("POST", f"{self.base}/{path}", form=form, retries=0)   # 書き込みは再試行しない（二重投稿防止）
 
     def resolve_user_id(self) -> str:
-        """IG_USER_ID が未設定なら、ページトークンのページにつながったInstagramのIDを使う。"""
-        if self.user_id in ("", "me"):
+        """投稿先のInstagram ID を、ページトークンのページにつながったInstagramから決める。
+
+        IG_USER_ID が設定されていても、それがInstagramのIDでない（FacebookページのIDなど）と投稿できないため、
+        トークンから分かるIDを優先する。分からないときだけ設定値を使う。"""
+        if getattr(self, "_resolved", False):
+            return self.user_id
+        configured = "" if self.user_id in ("", "me") else str(self.user_id)
+        try:
             page = self._get("me", fields="id,name,instagram_business_account")
             ig = (page.get("instagram_business_account") or {}).get("id")
-            if not ig:
-                raise RuntimeError("トークンのページにInstagramがつながっていません。"
-                                   "ページアクセストークン（手順書の手順4）を使っているか、"
-                                   "InstagramとFacebookページのつながり（手順1）を確認してください")
+        except HttpError:
+            ig = None
+            if not configured:
+                raise
+        if ig:
+            if configured and configured != str(ig):
+                log("注意：設定されたInstagram ID は、トークンのページにつながったInstagramと違います。"
+                    "トークンのページにつながったInstagram に投稿します（Secrets の IG_USER_ID は直さなくても動きます）")
             self.user_id = str(ig)
+        elif not configured:
+            raise RuntimeError("トークンのページにInstagramがつながっていません。"
+                               "ページアクセストークン（手順書の手順4）を使っているか、"
+                               "InstagramとFacebookページのつながり（手順1）を確認してください")
+        self._resolved = True
         return self.user_id
 
     def me(self) -> dict:
@@ -54,6 +69,7 @@ class Instagram:
         return r
 
     def quota_used(self) -> int:
+        self.resolve_user_id()
         r = self._get(f"{self.user_id}/content_publishing_limit", fields="quota_usage")
         data = r.get("data") or [{}]
         return int(data[0].get("quota_usage", 0))

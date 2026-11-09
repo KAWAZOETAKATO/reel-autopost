@@ -321,11 +321,34 @@ class InstagramClientTest(unittest.TestCase):
 
     def test_me_and_account_use_ig_id(self):
         def http(m, u, params=None, **kw):
+            if u.endswith("/me"):
+                return {"id": "PAGE1", "instagram_business_account": {"id": "1784"}}
             assert u.endswith("/1784"), u
             return {"id": "1784", "username": "aiaiai4772", "followers_count": 10, "media_count": 6}
         ig = Instagram("T", "1784", http=http)
         self.assertEqual(ig.me(), {"user_id": "1784", "username": "aiaiai4772"})
         self.assertEqual(ig.account()["followers_count"], 10)
+
+    def test_wrong_configured_id_uses_page_instagram(self):
+        """IG_USER_ID にFacebookページのIDが入っていても、ページにつながったInstagramに投稿する。"""
+        seen = []
+        def http(m, u, params=None, **kw):
+            seen.append(u)
+            if u.endswith("/me"):
+                return {"id": "PAGE1", "instagram_business_account": {"id": "1784"}}
+            return {"data": [{"quota_usage": 1}]}
+        ig = Instagram("T", "PAGE1", http=http)
+        self.assertEqual(ig.quota_used(), 1)
+        self.assertTrue(seen[-1].endswith("/1784/content_publishing_limit"))
+
+    def test_configured_id_kept_when_lookup_fails(self):
+        def http(m, u, params=None, **kw):
+            if u.endswith("/me"):
+                raise HttpError(400, "not a page token", u)
+            return {"data": [{"quota_usage": 2}]}
+        ig = Instagram("T", "1784", http=http)
+        self.assertEqual(ig.quota_used(), 2)
+        self.assertEqual(ig.user_id, "1784")
 
     def test_insights_fallback_per_metric(self):
         def http(method, url, params=None, **kw):
