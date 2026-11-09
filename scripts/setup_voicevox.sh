@@ -13,8 +13,12 @@ if [ ! -f "$D/.ready" ]; then
   echo "ONNX Runtime: $url"
   curl -sSfL "$url" | tar xz -C "$D/onnxruntime"
   # 0.vvm（四国めたん・ずんだもん・春日部つむぎ）／4.vvm（玄野武宏）／6.vvm（No.7）
+  # 声データは最新版だとこのVOICEVOX COREで読めない形式のことがあるので、0.16系の公開分を使う
+  gh release list -R VOICEVOX/voicevox_vvm -L 30 || true
+  TAG=$(gh api "repos/VOICEVOX/voicevox_vvm/releases?per_page=100" --jq '.[].tag_name' | grep -E '^0\.16\.' | sort -V | tail -1)
+  echo "声データ: voicevox_vvm $TAG"
   for n in 0 4 6; do
-    gh release download -R VOICEVOX/voicevox_vvm --pattern "${n}.vvm" -D "$D/models" --clobber
+    gh release download "$TAG" -R VOICEVOX/voicevox_vvm --pattern "${n}.vvm" -D "$D/models" --clobber
   done
   touch "$D/.ready"
 fi
