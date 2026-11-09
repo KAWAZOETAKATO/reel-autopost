@@ -1,0 +1,14 @@
+{
+  "id": "ai_giant_ramen_trial",
+  "model": "veo-3.1-fast-generate-preview",
+  "resolution": "720p",
+  "duration": 8,
+  "prompt": "Vertical 9:16 smartphone video, photorealistic. Inside a bright, busy Japanese ramen shop. A cheerful young Japanese man in a plain gray t-shirt sits at a wooden counter in front of a GIGANTIC bowl of tonkotsu ramen as wide as a car tire, piled with a mountain of bean sprouts, thick slices of chashu pork, and soft-boiled eggs, steam rising. He grabs a huge clump of noodles with chopsticks and slurps them loudly with determination, cheeks full. Two shop staff in black headbands stand behind the counter, one holding a stopwatch, both cheering. Handheld vlog camera, slow push-in toward the bowl, warm natural lighting, shallow depth of field. Audio: loud satisfying slurping and chewing sounds, staff shouting encouragement in Japanese, lively shop ambience. No on-screen text.",
+  "negative_prompt": "text, subtitles, captions, watermark, logo, distorted hands, extra fingers, cartoon",
+  "badge": "完食チャレンジ",
+  "hook": "完食したら\n*10億円*",
+  "sub": "直径1mの巨大ラーメン",
+  "end_text": "完食できると\n*思う？*",
+  "caption": "直径1mの巨大ラーメン、完食できたら10億円🍜\nあなたは完食できると思う？\nコメントで「できる」「むり」を教えてください👇\n\n次はどの巨大フードに挑戦してほしい？",
+  "hashtags": ["#完食チャレンジ", "#巨大ラーメン", "#大食い", "#AI動画", "#飯テロ"]
+}

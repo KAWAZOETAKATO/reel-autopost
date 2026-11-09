@@ -1,0 +1,62 @@
+# AI動画の試作（@satisfying.ai.flow 用）：Google Veo で映像を1本作り、文字とAI表記を重ねて Artifacts に置く。
+# 有料（Veo 3.1 Fast 720p・8秒で約0.8ドル）。押したときだけ動く。投稿はしない。
+name: AI動画の試作（有料・投稿しない）
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: 台本ファイル
+        default: ai_video/examples/giant_ramen.json
+      model:
+        description: Veoの種類（lite＝最安・fast＝標準・最高画質）
+        type: choice
+        default: veo-3.1-fast-generate-preview
+        options:
+          - veo-3.1-lite-generate-preview
+          - veo-3.1-fast-generate-preview
+          - veo-3.1-generate-preview
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-video-trial
+  cancel-in-progress: false
+
+jobs:
+  trial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 必要なものを入れる
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk > /dev/null
+          pip install -q Pillow google-genai
+      - name: Veo で映像を作り、文字を重ねる
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python - "${{ inputs.script }}" "${{ inputs.model }}" <<'PY'
+          import json, sys
+          s = json.load(open(sys.argv[1], encoding="utf-8"))
+          s["model"] = sys.argv[2]
+          json.dump(s, open("trial.json", "w", encoding="utf-8"), ensure_ascii=False)
+          PY
+          python ai_video/make_ai_reel.py trial.json out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ai-video-trial
+          path: |
+            out/reel.mp4
+            out/raw.mp4
+            out/cover.jpg
+            out/投稿情報.md
+          retention-days: 14
+          if-no-files-found: warn
