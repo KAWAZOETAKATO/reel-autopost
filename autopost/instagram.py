@@ -11,6 +11,10 @@ import time
 from .common import HttpError, http_json, log
 
 
+NOT_LINKED = ("トークンのFacebookページにInstagramがつながっていません。"
+              "Instagramをプロアカウントにして、そのFacebookページとつなげてください（手順書の手順1）")
+
+
 class Instagram:
     def __init__(self, token: str, user_id: str, version: str = "v26.0", http=http_json, sleep=time.sleep):
         self._token = token
@@ -49,9 +53,13 @@ class Instagram:
                     "トークンのページにつながったInstagram に投稿します（Secrets の IG_USER_ID は直さなくても動きます）")
             self.user_id = str(ig)
         elif not configured:
-            raise RuntimeError("トークンのページにInstagramがつながっていません。"
-                               "ページアクセストークン（手順書の手順4）を使っているか、"
-                               "InstagramとFacebookページのつながり（手順1）を確認してください")
+            raise RuntimeError(NOT_LINKED)
+        else:
+            # ページからInstagramが分からず、設定値をそのまま使う場合：それが本当にInstagramのIDかを確かめる
+            try:
+                self._get(configured, fields="id,username,media_count")
+            except HttpError as e:
+                raise RuntimeError(NOT_LINKED + f"（設定されたIDはInstagramのIDではありません：HTTP {e.status}）") from None
         self._resolved = True
         return self.user_id
 

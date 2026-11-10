@@ -341,6 +341,16 @@ class InstagramClientTest(unittest.TestCase):
         self.assertEqual(ig.quota_used(), 1)
         self.assertTrue(seen[-1].endswith("/1784/content_publishing_limit"))
 
+    def test_page_without_instagram_is_reported(self):
+        """ページにInstagramがつながっておらず、設定IDがページIDのとき：はっきり失敗させる。"""
+        def http(m, u, params=None, **kw):
+            if u.endswith("/me"):
+                return {"id": "PAGE1", "name": "page"}
+            raise HttpError(400, "nonexisting field (media_count)", u)
+        with self.assertRaises(RuntimeError) as cm:
+            Instagram("T", "PAGE1", http=http).resolve_user_id()
+        self.assertIn("つながっていません", str(cm.exception))
+
     def test_configured_id_kept_when_lookup_fails(self):
         def http(m, u, params=None, **kw):
             if u.endswith("/me"):

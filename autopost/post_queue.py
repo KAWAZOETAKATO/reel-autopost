@@ -134,7 +134,7 @@ def process(cfg: Config, notion: Notion, ig: Instagram | None, workdir: Path,
         client = None if cfg.dry_run else _client(ig, acct)
         if not cfg.dry_run and client is None:
             # まだ接続していないアカウントの行は、エラーにせず待たせる（Secretsを入れたら次の回から投稿）
-            log(f"{label}アカウントの投稿設定（{ACCOUNTS[acct][1]} / {ACCOUNTS[acct][2]}）が未設定のため待機：{name}")
+            log(f"{label}アカウントの投稿先が使えない（未設定・Instagram未接続）ため待機：{name}")
             summary["skipped"] += 1
             continue
         stage = "準備"
@@ -263,7 +263,7 @@ def main() -> int:
                 c.resolve_user_id()
                 ig[key] = c
             except Exception as e:
-                log(f"{ACCOUNTS[key][0]}アカウントのトークンが使えません：{e}")
+                log(f"{ACCOUNTS[key][0]}アカウントには今は投稿できません（この回の行は待機）：{e}")
         if not ig:
             log("本番投稿に必要な設定がありません：IG_ACCESS_TOKEN（または IG_ACCESS_TOKEN_KANJI）")
             return 1

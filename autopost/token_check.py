@@ -30,6 +30,8 @@ def main() -> int:
 def check_one(token: str, user_id: str, version: str) -> int:
     try:
         me = Instagram(token, user_id, version).me()
+        if not me.get("username"):
+            raise RuntimeError("投稿先のInstagramが見つかりません（ユーザー名が空）")
         log(f"トークンは有効です（アカウント：@{me.get('username', '?')}／ID：{me.get('user_id', '?')}）")
     except (HttpError, RuntimeError) as e:
         log(f"トークンが使えません（{getattr(e, 'status', '')} {str(e)[:200]}）。手順書の手順3〜4でトークンを作り直してください")
