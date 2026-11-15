@@ -32,8 +32,8 @@ def check_one(token: str, user_id: str, version: str) -> int:
         page = Instagram(token, user_id, version)._get("me", fields="id,name,instagram_business_account")
         ig = (page.get("instagram_business_account") or {}).get("id")
         log(f"このトークンのFacebookページ：「{page.get('name', '?')}」／Instagramとのつながり：{'あり' if ig else 'なし'}")
-    except HttpError as e:
-        log(f"トークンのページ名を調べられませんでした（HTTP {e.status}）")
+    except (HttpError, AttributeError) as e:
+        log(f"トークンのページ名を調べられませんでした（{getattr(e, 'status', '')}）")
     try:
         me = Instagram(token, user_id, version).me()
         if not me.get("username"):
