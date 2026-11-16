@@ -37,3 +37,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh issue create --repo "$GITHUB_REPOSITORY" --title "【要対応】Instagramのトークンを入れ直してください" --body "Facebookログイン版の手順書の手順3〜4でページアクセストークンを作り直し、Secretsの IG_ACCESS_TOKEN を更新してください。実行ログ: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+# 最終確認：2026-11-16T15:09Z
