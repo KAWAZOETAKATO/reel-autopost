@@ -5,6 +5,11 @@ on:
   schedule:
     - cron: "41 0 * * 0"         # 毎週日曜 日本時間 9:41
   workflow_dispatch: {}
+  push:                          # 確認の仕組みを直したときは、その場で一度確かめる（投稿はしない）
+    branches: [main]
+    paths:
+      - autopost/token_check.py
+      - .github/workflows/token.yml
 
 permissions:
   contents: read
