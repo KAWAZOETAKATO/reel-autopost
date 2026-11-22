@@ -1,0 +1,111 @@
+{
+ "id": "yomi_brand_owl_sample",
+ "series": "大人の漢字帖",
+ "bgm_style": "wa",
+ "theme": {
+  "bg_top": "#1e1915",
+  "bg_bottom": "#3b2b22",
+  "text": "#fffaf0",
+  "sub": "#eadbc6",
+  "accent": "#c0392b",
+  "mark": "#f4c95d",
+  "warn": "#d9826b",
+  "card": "#fffaf0",
+  "card_text": "#2a211b",
+  "grid": "#e3d6c4",
+  "header": "#f3ead9"
+ },
+ "scenes": [
+  {
+   "type": "hook",
+   "dur": 2.6,
+   "text": "このブランド名\n*読める？*",
+   "size": 112,
+   "say": "ふく先生のよみかたクイズ！",
+   "say_at": 0.1
+  },
+  {
+   "type": "quiz",
+   "dur": 2.6,
+   "q": "HERMÈS",
+   "a": "エルメス",
+   "no": 1,
+   "of": 5,
+   "reveal_at": 1.4,
+   "label": "ブランド名",
+   "say_answer": "エルメス"
+  },
+  {
+   "type": "quiz",
+   "dur": 2.6,
+   "q": "MONCLER",
+   "a": "モンクレール",
+   "no": 2,
+   "of": 5,
+   "reveal_at": 1.4,
+   "label": "ブランド名",
+   "say_answer": "モンクレール"
+  },
+  {
+   "type": "quiz",
+   "dur": 2.9,
+   "q": "BALENCIAGA",
+   "a": "バレンシアガ",
+   "no": 3,
+   "of": 5,
+   "reveal_at": 1.4,
+   "label": "ブランド名",
+   "say_answer": "バレンシアガ"
+  },
+  {
+   "type": "quiz",
+   "dur": 2.6,
+   "q": "LOEWE",
+   "a": "ロエベ",
+   "no": 4,
+   "of": 5,
+   "reveal_at": 1.4,
+   "label": "ブランド名",
+   "say_answer": "ロエベ"
+  },
+  {
+   "type": "quiz",
+   "dur": 3.4,
+   "q": "HUBLOT",
+   "a": "ウブロ",
+   "no": 5,
+   "of": 5,
+   "label": "ブランド名",
+   "ask": true,
+   "reveal_at": 1.6,
+   "ask_text": "答えは\nコメントで！",
+   "say": "答えはコメントで！",
+   "say_at": 1.65
+  },
+  {
+   "type": "cta",
+   "dur": 2.6,
+   "text": "5問目の答え\n*コメント*で！",
+   "sub": "正解は次の投稿で発表",
+   "say": "何問読めたかも教えてね",
+   "say_at": 0.2
+  }
+ ],
+ "caption": "ブランド名、正しく読める？ ふく先生の読み方クイズ🦉\n最後の5問目はコメントで答えてください👇\n\n.\n.\n.\n.\n.\n1〜4問目の答え：HERMÈS（エルメス）・MONCLER（モンクレール）・BALENCIAGA（バレンシアガ）・LOEWE（ロエベ）\n5問目の正解は次の投稿で発表します。\n\n読みは各ブランドの日本語の公式表記にもとづいています。",
+ "hashtags": [
+  "#読み方クイズ",
+  "#ブランド",
+  "#読めそうで読めない",
+  "#大人の教養",
+  "#クイズ"
+ ],
+ "post": {
+  "cover_title": "このブランド名\n読める？",
+  "alt_text": "フクロウのキャラクター「ふく先生」が、ブランド名5つの読み方を出題。4問は答えを表示し、最後の1問はコメント欄で答えを募る動画。",
+  "post_time": "20:17",
+  "footer": "5問目の答えと、何問読めたかをコメントで教えてください。\n▶ ふく先生の読み方クイズを毎日投稿中 @otona_kanjicho"
+ },
+ "voice_speed": 1.35,
+ "voice_id": 29,
+ "character": "owl"
+}

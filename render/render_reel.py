@@ -291,6 +291,10 @@ def scene_hook(img, ctx: Ctx, sc: dict, t: float):
         f2, l2, s2 = ctx.fit(sc["sub"], 820, 220, 56, 40, "Bold", 1.3, 3, "冒頭サブ")
         draw_lines(img, ctx, f2, l2, s2, W / 2, end + 50, rgb(th["sub"]), rgb(th["mark"]), 1.3,
                    t=t, start=0.25 + len(lines) * 0.14, stagger=0.1)
+    if getattr(ctx, "character", None) == "owl":
+        pin = ease_back(progress(t, 0.15, 0.35))
+        if pin > 0:
+            draw_owl(img, W / 2, 1270 + 60 * (1 - pin), 300, sc["_start"] + t, owl_talking(ctx, sc["_start"] + t))
 
 
 def scene_points(img, ctx: Ctx, sc: dict, t: float):
@@ -587,9 +591,12 @@ def scene_compare(img, ctx: Ctx, sc: dict, t: float):
 def scene_cta(img, ctx: Ctx, sc: dict, t: float):
     th = ctx.theme
     d = ImageDraw.Draw(img, "RGBA")
-    # しおりアイコン（保存ボタン）
+    # しおりアイコン（保存ボタン）。フクロウ先生がいるときは先生が締める
     p = ease_back(progress(t, 0.1, 0.45))
-    if p > 0:
+    if getattr(ctx, "character", None) == "owl":
+        if p > 0:
+            draw_owl(img, W / 2, 500 + 40 * (1 - p), 330, sc["_start"] + t, owl_talking(ctx, sc["_start"] + t))
+    elif p > 0:
         cx, cy, s = W / 2, 560, 120 * p
         pts = [(cx - s * 0.6, cy - s), (cx + s * 0.6, cy - s), (cx + s * 0.6, cy + s), (cx, cy + s * 0.55),
                (cx - s * 0.6, cy + s)]
@@ -604,6 +611,118 @@ def scene_cta(img, ctx: Ctx, sc: dict, t: float):
         end2 = draw_lines(img, ctx, f2, l2, s2, W / 2, end + 50, rgb(th["sub"]), rgb(th["mark"]), 1.35, t=t,
                           start=1.0, stagger=0.1)
         check_box(ctx, text_box(f2, l2, W / 2, end + 50, end2), "締めサブ")
+
+
+
+# ---------------------------------------------------------------- キャラクター（大人の漢字帖：フクロウのふく先生）
+# 台本の全体に "character": "owl" を書くと、フクロウ先生が問題を出す形になる（オリジナルキャラクター。図形だけで描く）。
+CHAR_SS = 3  # キャラクターをなめらかに描くための拡大率
+
+
+def _blink(t: float) -> float:
+    """0=開いている 1=閉じている。約3.2秒ごとに0.12秒まばたき。"""
+    p = (t % 3.2)
+    return 1.0 if 3.05 < p < 3.17 else 0.0
+
+
+def _mouth(t: float, talking: bool) -> float:
+    return (0.5 + 0.5 * math.sin(t * 22)) if talking else 0.0
+
+
+def _canvas(size: int):
+    w = h = int(size * 1.3) * CHAR_SS
+    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    return layer, ImageDraw.Draw(layer), w, h
+
+
+def _paste(img, layer, cx, cy):
+    small = layer.resize((layer.width // CHAR_SS, layer.height // CHAR_SS), Image.LANCZOS)
+    img.paste(small, (int(cx - small.width / 2), int(cy - small.height / 2)), small)
+
+
+def _eye(d, x, y, r, blink, iris=(42, 30, 22), white=(255, 255, 255), ring=None):
+    if ring:
+        d.ellipse([x - r * 1.22, y - r * 1.22, x + r * 1.22, y + r * 1.22], fill=ring)
+    if blink > 0.5:
+        d.arc([x - r, y - r * 0.6, x + r, y + r * 0.6], 200, 340, fill=iris, width=max(4, int(r * 0.22)))
+        return
+    d.ellipse([x - r, y - r, x + r, y + r], fill=white)
+    ir = r * 0.62
+    d.ellipse([x - ir, y - ir + r * 0.08, x + ir, y + ir + r * 0.08], fill=iris)
+    hl = r * 0.24
+    d.ellipse([x - ir * 0.35 - hl, y - ir * 0.45 - hl, x - ir * 0.35 + hl, y - ir * 0.45 + hl], fill=white)
+
+
+def draw_owl(img, cx, cy, size, t=0.0, talking=False):
+    """フクロウ先生：丸い茶色のフクロウ。丸めがね、えんじ色のえりまき、手に筆。"""
+    layer, d, w, h = _canvas(size)
+    s = size * CHAR_SS / 400
+    ox, oy = w / 2, h / 2 + 10 * s
+    brown, belly, dark = (139, 94, 60), (240, 222, 190), (96, 62, 38)
+    # 耳（羽角）
+    d.polygon([(ox - 120 * s, oy - 120 * s), (ox - 150 * s, oy - 205 * s), (ox - 60 * s, oy - 150 * s)], fill=dark)
+    d.polygon([(ox + 120 * s, oy - 120 * s), (ox + 150 * s, oy - 205 * s), (ox + 60 * s, oy - 150 * s)], fill=dark)
+    # 体
+    d.ellipse([ox - 165 * s, oy - 175 * s, ox + 165 * s, oy + 185 * s], fill=brown)
+    d.ellipse([ox - 105 * s, oy - 10 * s, ox + 105 * s, oy + 170 * s], fill=belly)
+    for k in range(3):                                         # おなかの模様
+        yy = oy + (40 + k * 38) * s
+        for j in (-1, 0, 1):
+            xx = ox + j * 38 * s
+            d.arc([xx - 14 * s, yy - 8 * s, xx + 14 * s, yy + 12 * s], 200, 340, fill=(205, 178, 140), width=int(5 * s))
+    # つばさ
+    d.ellipse([ox - 190 * s, oy - 20 * s, ox - 110 * s, oy + 140 * s], fill=dark)
+    d.ellipse([ox + 110 * s, oy - 20 * s, ox + 190 * s, oy + 140 * s], fill=dark)
+    # 顔の白い部分
+    d.ellipse([ox - 135 * s, oy - 140 * s, ox - 5 * s, oy - 10 * s], fill=(250, 240, 222))
+    d.ellipse([ox + 5 * s, oy - 140 * s, ox + 135 * s, oy - 10 * s], fill=(250, 240, 222))
+    b = _blink(t)
+    _eye(d, ox - 70 * s, oy - 75 * s, 40 * s, b)
+    _eye(d, ox + 70 * s, oy - 75 * s, 40 * s, b)
+    # 丸めがね
+    for x in (-70, 70):
+        d.ellipse([ox + (x - 54) * s, oy - 129 * s, ox + (x + 54) * s, oy - 21 * s], outline=(50, 40, 35), width=int(7 * s))
+    d.line([ox - 16 * s, oy - 80 * s, ox + 16 * s, oy - 80 * s], fill=(50, 40, 35), width=int(7 * s))
+    # ほっぺ
+    for x in (-112, 112):
+        d.ellipse([ox + (x - 18) * s, oy - 40 * s, ox + (x + 18) * s, oy - 22 * s], fill=(236, 140, 130, 150))
+    # えりまき
+    d.rounded_rectangle([ox - 120 * s, oy + 12 * s, ox + 120 * s, oy + 44 * s], radius=int(16 * s), fill=(176, 48, 48))
+    d.polygon([(ox + 60 * s, oy + 28 * s), (ox + 95 * s, oy + 105 * s), (ox + 55 * s, oy + 95 * s)], fill=(150, 36, 36))
+    # くちばし（話すと少し開く）
+    m = _mouth(t, talking)
+    d.polygon([(ox - 20 * s, oy - 22 * s), (ox + 20 * s, oy - 22 * s), (ox, oy + (8 + 6 * m) * s)], fill=(242, 168, 46))
+    if m > 0.2:
+        d.line([ox - 14 * s, oy - 12 * s, ox + 14 * s, oy - 12 * s], fill=(150, 80, 20), width=int(4 * s))
+    # 足
+    for x in (-55, 55):
+        d.ellipse([ox + (x - 30) * s, oy + 168 * s, ox + (x + 30) * s, oy + 198 * s], fill=(242, 168, 46))
+    # 筆（右のつばさに持つ）
+    d.line([ox + 150 * s, oy + 60 * s, ox + 225 * s, oy - 90 * s], fill=(120, 72, 40), width=int(14 * s))
+    d.polygon([(ox + 140 * s, oy + 55 * s), (ox + 160 * s, oy + 65 * s), (ox + 138 * s, oy + 110 * s)], fill=(30, 26, 24))
+    _paste(img, layer, cx, cy)
+
+
+
+
+def owl_bubble(img, ctx: Ctx, x0, y0, x1, lines: list[str], tail_x: float, tail_y: float, alpha=1.0):
+    """フクロウ先生のふきだし（白・角丸、しっぽ付き）。lines は1〜2行。"""
+    th = ctx.theme
+    d = ImageDraw.Draw(img, "RGBA")
+    f1, f2 = font(50, "Black"), font(40, "Bold")
+    h = 40 + 62 + (54 if len(lines) > 1 else 0)
+    a = int(255 * alpha)
+    d.polygon([(x0 + 10, y0 + h * 0.45), (x0 + 10, y0 + h * 0.8), (tail_x, tail_y)], fill=(255, 252, 245, a))
+    rounded(d, [x0, y0, x1, y0 + h], 34, fill=(255, 252, 245, a))
+    cx = (x0 + x1) / 2
+    d.text((cx - f1.getlength(lines[0]) / 2, y0 + 18), lines[0], font=f1, fill=rgb(th["accent"], a))
+    if len(lines) > 1:
+        d.text((cx - f2.getlength(lines[1]) / 2, y0 + 88), lines[1], font=f2, fill=rgb(th["card_text"], a))
+    return [x0, y0, x1, y0 + h]
+
+
+def owl_talking(ctx: Ctx, t_abs: float) -> bool:
+    return any(a <= t_abs <= b for a, b in getattr(ctx, "talk", []))
 
 
 def scene_quiz(img, ctx: Ctx, sc: dict, t: float):
@@ -621,14 +740,15 @@ def scene_quiz(img, ctx: Ctx, sc: dict, t: float):
     ask = bool(sc.get("ask"))
     if ask:                                                    # 答えは出さず、時間バーのあとコメントを促す
         reveal = float(sc.get("reveal_at", dur * 0.55))
-    # 問題番号（例：3 / 5）
-    if sc.get("no"):
+    owl = getattr(ctx, "character", None) == "owl"
+    # 問題番号（例：3 / 5）。フクロウ先生がいるときは、ふきだしで出す
+    if sc.get("no") and not owl:
         fb = font(54, "Black")
         label = f"{sc['no']}" + (f" / {sc['of']}" if sc.get("of") else "")
         w = fb.getlength(label) + 70
         rounded(d, [W / 2 - w / 2, 300, W / 2 + w / 2, 392], 46, fill=rgb(th["accent"], 255))
         d.text((W / 2 - fb.getlength(label) / 2, 314), label, font=fb, fill=rgb("#ffffff"))
-    if sc.get("label"):
+    if sc.get("label") and not owl:
         f, l, sz = ctx.fit(sc["label"], 820, 120, 60, 40, "Bold", 1.2, 1, "クイズの見出し")
         draw_lines(img, ctx, f, l, sz, W / 2, 430, rgb(th["sub"]), rgb(th["mark"]), 1.2)
     # 問題のカード
@@ -682,7 +802,7 @@ def scene_quiz(img, ctx: Ctx, sc: dict, t: float):
             ctx.sfx.append((sc["_start"] + reveal, "ding"))
         fa = font(int(120 * (0.6 + 0.4 * pa)), "Black")
         a = str(sc["a"])
-        while fa.getlength(a) > SAFE_RIGHT_LOW - SAFE_LEFT - 40 and fa.size > 50:
+        while fa.getlength(a) > SAFE_RIGHT_LOW - SAFE_LEFT - 150 and fa.size > 50:
             fa = font(fa.size - 4, "Black")
         bb = d.textbbox((0, 0), a, font=fa)
         w, hgt = bb[2] - bb[0], bb[3] - bb[1]
@@ -695,6 +815,16 @@ def scene_quiz(img, ctx: Ctx, sc: dict, t: float):
             d.text((W / 2 - fn.getlength(n) / 2, 1330), n, font=fn, fill=rgb(th["sub"], 230))
         if t > reveal + 0.3:
             check_box(ctx, box, "クイズの答え")
+    if owl:
+        head = f"第{sc['no']}問" if sc.get("no") else "問題"
+        if sc.get("label"):
+            head += "　" + str(sc["label"]).replace("最終問題　", "").replace("最終問題", "")
+        if ask:
+            head = "最終問題" + ("　" + head.split("　", 1)[1] if "　" in head else "")
+        line2 = sc.get("owl_say") or ("むずかしいぞ〜" if ask else "これ、読めるかな？")
+        draw_owl(img, 195, 395, 280, sc["_start"] + t, owl_talking(ctx, sc["_start"] + t))
+        bb = owl_bubble(img, ctx, 360, 262, SAFE_RIGHT, [head, line2], 315, 385)
+        check_box(ctx, bb, "ふきだし")
 
 
 def _wrap_jp(text: str, fnt, max_w: float) -> list[str]:
@@ -1227,12 +1357,24 @@ def render(script_path: Path, out_dir: Path) -> dict:
     frames_dir = out_dir / "frames"
     frames_dir.mkdir(exist_ok=True)
     ctx = Ctx(spec.get("theme"))
+    ctx.character = spec.get("character")
     scenes = spec["scenes"]
     start = 0.0
     for sc in scenes:
         sc["_start"] = start
         start += float(sc["dur"])
     total = start
+    # キャラクターの口パク用：読み上げのおおよその区間（1字0.13秒÷速さ）
+    vs = float(spec.get("voice_speed", 1.15))
+    ctx.talk = []
+    if spec.get("voice", True):
+        for sc in scenes:
+            if sc.get("say"):
+                a = sc["_start"] + float(sc.get("say_at", 0.05))
+                ctx.talk.append((a, a + len(sc["say"]) * 0.13 / vs))
+            if sc.get("say_answer"):
+                a = sc["_start"] + float(sc.get("reveal_at", float(sc["dur"]) * 0.6))
+                ctx.talk.append((a, a + len(sc["say_answer"]) * 0.13 / vs))
     first_sheet = next((sc for sc in scenes if sc["type"] == "sheet"), None)
     for sc in scenes:
         if sc["type"] == "hook" and first_sheet is not None and sc.get("preview", True):
@@ -1270,7 +1412,8 @@ def render(script_path: Path, out_dir: Path) -> dict:
         local = t - sc["_start"]
         img = background(ctx, t)
         SCENES[sc["type"]](img, ctx, sc, local)
-        series_badge(img, ctx, spec.get("series", ""), t)
+        if not ctx.character:                 # キャラクターがいるときは、キャラが看板代わり
+            series_badge(img, ctx, spec.get("series", ""), t)
         # 場面の切り替え（短いフェード）
         fade = clamp(local / 0.18) if idx > 0 else 1.0
         if fade < 1:
