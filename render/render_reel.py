@@ -611,11 +611,16 @@ def scene_quiz(img, ctx: Ctx, sc: dict, t: float):
 
     {"type": "quiz", "dur": 2.6, "q": "蝸牛", "a": "かたつむり", "no": 1, "of": 5,
      "reveal_at": 1.6, "label": "読める？", "note": "出典：デジタル大辞泉"}
+
+    最後の1問をコメント欄に聞くとき：{"ask": true, "ask_text": "答えは\nコメントで！"}（"a" は台本の記録用で画面には出さない）
     """
     th = ctx.theme
     d = ImageDraw.Draw(img, "RGBA")
     dur = float(sc["dur"])
     reveal = float(sc.get("reveal_at", dur * 0.6))
+    ask = bool(sc.get("ask"))
+    if ask:                                                    # 答えは出さず、時間バーのあとコメントを促す
+        reveal = float(sc.get("reveal_at", dur * 0.55))
     # 問題番号（例：3 / 5）
     if sc.get("no"):
         fb = font(54, "Black")
@@ -655,6 +660,22 @@ def scene_quiz(img, ctx: Ctx, sc: dict, t: float):
         for k in range(1, int(reveal / 0.5) + 1):              # 0.5秒ごとにカチッ
             if abs(t - k * 0.5) < 1 / FPS and k * 0.5 < reveal:
                 ctx.sfx.append((sc["_start"] + k * 0.5, "tick"))
+    elif ask:
+        pa = ease_back(progress(t, reveal, 0.25))
+        if abs(t - reveal) < 1 / FPS:
+            ctx.sfx.append((sc["_start"] + reveal, "pop"))
+        text = str(sc.get("ask_text", "答えは\n*コメント*で！"))
+        fa = font(int(96 * (0.6 + 0.4 * pa)), "Black")
+        lines = text.replace("*", "").split("\n")
+        lh = int(fa.size * 1.25)
+        w = max(fa.getlength(x) for x in lines)
+        box = [W / 2 - w / 2 - 50, 1100, W / 2 + w / 2 + 50, 1100 + lh * len(lines) + 56]
+        rounded(d, box, 34, fill=rgb(th["mark"], int(255 * clamp(pa))))
+        for i, x in enumerate(lines):
+            d.text((W / 2 - fa.getlength(x) / 2, 1128 + i * lh), x, font=fa,
+                   fill=rgb(th["card_text"], int(255 * clamp(pa))))
+        if t > reveal + 0.3:
+            check_box(ctx, box, "コメントのお願い")
     else:
         pa = ease_back(progress(t, reveal, 0.25))
         if abs(t - reveal) < 1 / FPS:
