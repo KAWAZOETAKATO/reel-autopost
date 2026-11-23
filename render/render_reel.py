@@ -937,6 +937,7 @@ BGM_STYLES = {
                "lead": "square", "arp": "sixteenth", "arp_amp": 0.03, "drums": "four", "oct": 12, "bass": "eighth"},
 }
 BGM_STYLES["wa"] = {"bpm": (84, 88, 92), "progs": [[0]], "lead": "koto"}   # 和風：琴・尺八・拍子木
+BGM_STYLES["matsuri"] = {"bpm": (132, 136, 140), "progs": [[0]], "lead": "shamisen"}   # 明るい和風：祭りばやし風
 BGM_STYLE_DEFAULT = "city"   # 2026-11-04 社長がB案（シティポップ風）に決定
 
 
@@ -944,6 +945,8 @@ def synth_bgm(total: float, seed: str = "", sr: int = 48000, style: str | None =
     """BGMを合成する。台本の id から調・コード進行・テンポを決めるので、リールごとに少しずつ違う曲になる。"""
     if (style or BGM_STYLE_DEFAULT) == "wa":
         return _synth_wa(total, seed, sr)
+    if style == "matsuri":
+        return _synth_matsuri(total, seed, sr)
     st = BGM_STYLES.get(style or BGM_STYLE_DEFAULT, BGM_STYLES["lofi"])
     h = sum(ord(c) * (i + 1) for i, c in enumerate(seed or "reel"))
     key = _NOTE["CDFGA"[h % 5]]
@@ -1063,6 +1066,86 @@ def synth_bgm(total: float, seed: str = "", sr: int = 48000, style: str | None =
     out[:fade_in] *= np.linspace(0, 1, fade_in)
     out[-fade_out:] *= np.linspace(1, 0, fade_out)
     peak = float(np.max(np.abs(out))) or 1.0
+    return (out / peak * 0.32).astype(np.float32)   # 効果音より控えめ
+
+
+def _synth_matsuri(total: float, seed: str = "", sr: int = 48000) -> np.ndarray:
+    """明るい和風（祭りばやし風）：陽音階の篠笛＋三味線のはずむ伴奏＋太鼓（ドンドコ）＋鉦（チャンチキ）。"""
+    h = sum(ord(c) * (i + 1) for i, c in enumerate(seed or "matsuri"))
+    rng = np.random.default_rng(h)
+    bpm = BGM_STYLES["matsuri"]["bpm"][h % 3]
+    beat = 60.0 / bpm
+    key = 62 + (0, 2, -2)[(h // 3) % 3]
+    scale = [0, 2, 4, 7, 9]                               # 明るい五音音階（ド・レ・ミ・ソ・ラ）
+    n = int(total * sr) + sr
+    out = np.zeros(n, dtype=np.float32)
+
+    def add(at, sig):
+        i = int(at * sr)
+        if 0 <= i < n:
+            j = min(n, i + len(sig))
+            out[i:j] += sig[: j - i]
+
+    def hz(m):
+        return 440.0 * 2 ** ((m - 69) / 12)
+
+    def shamisen(f, dur, amp):                            # 歯切れのよい三味線（倍音多め・すぐ減衰）
+        m = int(dur * sr)
+        tt = np.arange(m) / sr
+        ph = 2 * np.pi * f * tt * (1 + 0.004 * np.exp(-tt * 40))
+        w = np.sin(ph) + 0.7 * np.sin(2 * ph) + 0.5 * np.sin(3 * ph) + 0.3 * np.sin(4 * ph) + 0.2 * np.sin(6 * ph)
+        env = np.minimum(1, tt / 0.002) * np.exp(-tt * 9)
+        return (w * env * amp * 0.45).astype(np.float32)
+
+    def fue(f, dur, amp):                                 # 篠笛（澄んだ音＋少しの息）
+        m = int(dur * sr)
+        tt = np.arange(m) / sr
+        vib = 1 + 0.005 * np.sin(2 * np.pi * 6 * tt) * np.minimum(1, tt / 0.15)
+        ph = 2 * np.pi * np.cumsum(f * vib) / sr
+        breath = np.convolve(rng.uniform(-1, 1, m), np.ones(12) / 12, mode="same")
+        w = np.sin(ph) + 0.08 * np.sin(2 * ph) + 0.12 * breath
+        env = np.minimum(1, tt / 0.02) * np.minimum(1, (dur - tt) / 0.04) * (0.85 + 0.15 * np.exp(-tt * 4))
+        return (w * env * amp).astype(np.float32)
+
+    m = int(0.35 * sr)
+    tt = np.arange(m) / sr
+    don = (np.sin(2 * np.pi * np.cumsum(np.linspace(120, 60, m)) / sr) * np.exp(-tt * 9) * 0.5).astype(np.float32)
+    m2 = int(0.12 * sr)
+    t2 = np.arange(m2) / sr
+    ko = (np.sin(2 * np.pi * np.cumsum(np.linspace(180, 120, m2)) / sr) * np.exp(-t2 * 25) * 0.22).astype(np.float32)
+    m3 = int(0.09 * sr)
+    t3 = np.arange(m3) / sr
+    kane = ((np.sin(2 * np.pi * 2600 * t3) + 0.6 * np.sin(2 * np.pi * 3900 * t3) + 0.3 * rng.uniform(-1, 1, m3))
+            * np.exp(-t3 * 45) * 0.06).astype(np.float32)
+
+    # 篠笛の旋律：2小節の明るいフレーズをくり返し、少しずつ変える
+    phrase = [(2, 1), (3, 1), (4, 1), (3, 1), (2, 2), (0, 2), (1, 1), (2, 1), (3, 2), (2, 1), (1, 1), (0, 2), (None, 2)]
+    t, k = 0.0, 0
+    step = beat / 2
+    while t < total + beat * 4:
+        if k % 4 == 0:
+            add(t, don)                                   # ドン（拍の頭）
+        if k % 8 in (3, 7):
+            add(t, ko)                                    # コ
+        if k % 16 == 14:
+            add(t, ko); add(t + step / 2, ko)             # ドコドコ（つなぎ）
+        if k % 2 == 1:
+            add(t, kane)                                  # チャンチキ（裏拍）
+        root = key - 12 + (0, 0, 7, 5)[(k // 16) % 4]
+        add(t, shamisen(hz(root if k % 2 == 0 else root + 7), step * 1.5, 0.11))
+        t += step
+        k += 1
+    t, rep = beat * 0, 0
+    while t < total + beat * 8:
+        for deg, length in phrase:
+            dur = length * step
+            if deg is not None:
+                d2 = deg + (1 if rep % 2 and rng.random() < 0.3 else 0)
+                mn = key + 12 + scale[d2 % 5] + 12 * (d2 // 5)
+                add(t, fue(hz(mn), dur * 0.95, 0.05))
+            t += dur
+        rep += 1
+    peak = np.max(np.abs(out)) or 1.0
     return (out / peak * 0.32).astype(np.float32)   # 効果音より控えめ
 
 
